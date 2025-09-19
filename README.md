@@ -37,22 +37,37 @@ MDM creates a **single source of truth** for critical business entities, enablin
 
 ## Architecture Diagrams
 
-This repository includes three architectural views to help you understand different implementation approaches:
+This repository includes multiple architectural views to help you understand different implementation approaches:
 
-### 1. Complete Architecture (Both Approaches)
+### Core MDM Architectures
+
+#### 1. Complete Architecture (Both Approaches)
 Shows both DIY and Third-Party approaches side-by-side for comparison:
 
 ![Complete MDM Architecture on GCP](images/mdm_architecture.png)
 
-### 2. GCP Native Architecture (DIY Approach)
+#### 2. GCP Native Architecture (DIY Approach)
 Focuses exclusively on the DIY approach using only GCP services:
 
 ![GCP Native MDM Architecture](images/mdm_architecture_gcp.png)
 
-### 3. Third-Party Architecture (Tamr/Reltio/Informatica)
+#### 3. Third-Party Architecture (e.g., Tamr)
 Shows integration with third-party MDM tools:
 
 ![Third-Party MDM Architecture](images/mdm_architecture_3pt.png)
+
+### Advanced Architectures
+
+#### 4. Unified Batch + Streaming Architecture
+Generic MDM architecture supporting both batch and real-time processing paths:
+
+![Unified MDM Architecture](images/mdm_unified_matching.png)
+
+This unified architecture demonstrates:
+- **Dual processing paths**: Batch (BigQuery-centric) and Streaming (Kafka/Dataflow)
+- **Generic entity model**: Works for any industry (banking, retail, healthcare, travel)
+- **Technology choices**: Cost-effective batch vs. real-time streaming
+- **Unified matching layer**: Both paths converge at the matching engine
 
 ## Table of Contents
 
@@ -125,34 +140,10 @@ You must have [Graphviz](https://graphviz.org/download/) installed on your local
 
 The repository contains three DOT source files. You can generate the diagram images using the following commands from your terminal:
 
-**To generate all PNG images:**
-```bash
-# Complete architecture (both approaches)
-dot -Tpng mdm_architecture.dot -o images/mdm_architecture.png
-
-# GCP Native (DIY) architecture
-dot -Tpng mdm_architecture_gcp.dot -o images/mdm_architecture_gcp.png
-
-# Third-Party architecture
-dot -Tpng mdm_architecture_3pt.dot -o images/mdm_architecture_3pt.png
-```
-
-**To generate all SVG images:**
-```bash
-# Complete architecture (both approaches)
-dot -Tsvg mdm_architecture.dot -o images/mdm_architecture.svg
-
-# GCP Native (DIY) architecture
-dot -Tsvg mdm_architecture_gcp.dot -o images/mdm_architecture_gcp.svg
-
-# Third-Party architecture
-dot -Tsvg mdm_architecture_3pt.dot -o images/mdm_architecture_3pt.svg
-```
-
-**To generate all diagrams at once:**
+**To generate all diagrams at once (SVG/PNG):**
 ```bash
 # Generate all PNG files
-for file in mdm_architecture*.dot; do
+for file in *.dot; do
     dot -Tpng "$file" -o "images/${file%.dot}.png"
 done
 ```

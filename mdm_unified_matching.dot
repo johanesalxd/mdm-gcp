@@ -1,0 +1,188 @@
+digraph Unified_MDM_Architecture {
+  rankdir=TB;
+  node [shape=box, style=rounded];
+  compound=true;
+
+  subgraph cluster_legend {
+    label = "Legend";
+    style=filled;
+    fillcolor="#F5F5F5";
+    GCP_Service [label="GCP Service", fillcolor="#E1F5FE", style="filled,solid"];
+    Data_Storage [label="Data / Storage", shape=cylinder, fillcolor="#FFF8E1", style="filled,solid"];
+    Process_Step [label="Process / Step", shape=ellipse, fillcolor="#E0F7FA", style="filled,solid"];
+    ML_Component [label="ML / AI", shape=hexagon, fillcolor="#E8F5E8", style="filled,solid"];
+    Cache_Layer [label="Cache / Memory", shape=diamond, fillcolor="#F3E5F5", style="filled,solid"];
+  }
+
+  subgraph cluster_data_sources {
+    label = "1. Data Sources";
+    bgcolor="#E8F5E8";
+
+    subgraph cluster_batch_sources {
+      label = "Batch Sources";
+      bgcolor="#F0F8F0";
+      Files [label="Files\n(CSV, JSON, Parquet)", shape=cylinder, fillcolor="#FFF8E1"];
+      APIs [label="REST APIs\n(CRM, ERP)", shape=cylinder, fillcolor="#FFF8E1"];
+      Databases [label="Databases\n(MySQL, PostgreSQL)", shape=cylinder, fillcolor="#FFF8E1"];
+    }
+
+    subgraph cluster_stream_sources {
+      label = "Stream Sources";
+      bgcolor="#F0F0F8";
+      Kafka [label="Apache Kafka\n(Real-time Events)", shape=cylinder, fillcolor="#FFF8E1"];
+      PubSub [label="Pub/Sub\n(Change Events)", fillcolor="#E1F5FE"];
+      CDC [label="Change Data Capture\n(Database Logs)", shape=cylinder, fillcolor="#FFF8E1"];
+    }
+
+    // Sample entity data
+    Sample_Entity [label="Sample Entity Data:\n• ID: 'CUST_12345'\n• Name: 'John Smith'\n• Email: 'john.smith@email.com'\n• Phone: '+1-555-0123'\n• Address: '123 Main St, NYC'\n• Category: 'Premium Customer'",
+                   shape=note, fillcolor="#FFFACD", style="filled,dashed"];
+  }
+
+  subgraph cluster_processing_paths {
+    label = "2. Dual Processing Paths";
+    bgcolor="#F5F5F5";
+
+    subgraph cluster_batch_path {
+      label = "Batch Processing Path";
+      bgcolor="#E6F3FF";
+
+      // Batch ingestion
+      Cloud_Functions_Batch [label="Cloud Functions\n(Batch Ingestion)", fillcolor="#E1F5FE"];
+      BQ_Raw [label="BigQuery Raw\n(Per Source)", shape=cylinder, fillcolor="#FFF8E1"];
+      BQ_Standardization [label="BigQuery SQL\n(Standardization)", shape=ellipse, fillcolor="#E0F7FA"];
+      BQ_Staging [label="BigQuery Staging\n(Clean Entities)", shape=cylinder, fillcolor="#FFF8E1"];
+
+      // Batch embedding
+      Batch_Embedding [label="Batch Embedding\n(Python + Vertex AI)", shape=hexagon, fillcolor="#E8F5E8"];
+      BQ_Embeddings [label="BigQuery\n(Entities + Embeddings)", shape=cylinder, fillcolor="#FFF8E1"];
+
+      // Batch matching
+      BQ_Vector_Search [label="BigQuery\nVector Search", shape=hexagon, fillcolor="#E8F5E8"];
+
+      // Flow
+      Files -> Cloud_Functions_Batch;
+      APIs -> Cloud_Functions_Batch;
+      Databases -> Cloud_Functions_Batch;
+      Cloud_Functions_Batch -> BQ_Raw;
+      BQ_Raw -> BQ_Standardization;
+      BQ_Standardization -> BQ_Staging;
+      BQ_Staging -> Batch_Embedding;
+      Batch_Embedding -> BQ_Embeddings;
+      BQ_Embeddings -> BQ_Vector_Search;
+    }
+
+    subgraph cluster_stream_path {
+      label = "Stream Processing Path";
+      bgcolor="#FFE6F3";
+
+      // Stream ingestion
+      Dataflow_Stream [label="Dataflow\n(Streaming Pipeline)", fillcolor="#E1F5FE"];
+      Stream_Standardization [label="Stream Processing\n(Real-time Cleansing)", shape=ellipse, fillcolor="#E0F7FA"];
+
+      // Stream embedding
+      Stream_Embedding [label="Dataflow Transform\n(Vertex AI Embeddings)", shape=hexagon, fillcolor="#E8F5E8"];
+      Embedding_Cache [label="Memorystore Redis\n(Embedding Cache)", shape=diamond, fillcolor="#F3E5F5"];
+
+      // Stream matching
+      Vertex_Matching_Engine [label="Vertex AI\nMatching Engine", shape=hexagon, fillcolor="#E8F5E8"];
+
+      // Flow
+      Kafka -> Dataflow_Stream;
+      PubSub -> Dataflow_Stream;
+      CDC -> Dataflow_Stream;
+      Dataflow_Stream -> Stream_Standardization;
+      Stream_Standardization -> Stream_Embedding;
+      Stream_Embedding -> Embedding_Cache;
+      Embedding_Cache -> Vertex_Matching_Engine;
+    }
+  }
+
+  subgraph cluster_unified_matching {
+    label = "3. Unified Matching Engine";
+    bgcolor="#FFF0E6";
+
+    subgraph cluster_matching_strategies {
+      label = "Matching Strategies";
+      bgcolor="#F8F8F8";
+
+      Exact_Match [label="Exact Match\n(ID, Email, Phone)", fillcolor="#E1F5FE"];
+      Fuzzy_Match [label="Fuzzy Match\n(Name, Address)", fillcolor="#E1F5FE"];
+      Vector_Similarity [label="Vector Similarity\n(Semantic Matching)", shape=hexagon, fillcolor="#E8F5E8"];
+      Business_Rules [label="Business Rules\n(Domain-specific)", fillcolor="#E1F5FE"];
+    }
+
+    Match_Combiner [label="Match Score Combiner\n(Weighted Ensemble)", shape=ellipse, fillcolor="#E0F7FA"];
+    Confidence_Scoring [label="Confidence Scoring\n(Threshold-based)", shape=ellipse, fillcolor="#E0F7FA"];
+
+    // Connections from both paths
+    BQ_Vector_Search -> Vector_Similarity;
+    Vertex_Matching_Engine -> Vector_Similarity;
+
+    BQ_Embeddings -> Exact_Match;
+    BQ_Embeddings -> Fuzzy_Match;
+    BQ_Embeddings -> Business_Rules;
+
+    Stream_Standardization -> Exact_Match;
+    Stream_Standardization -> Fuzzy_Match;
+    Stream_Standardization -> Business_Rules;
+
+    Exact_Match -> Match_Combiner;
+    Fuzzy_Match -> Match_Combiner;
+    Vector_Similarity -> Match_Combiner;
+    Business_Rules -> Match_Combiner;
+
+    Match_Combiner -> Confidence_Scoring;
+  }
+
+  subgraph cluster_decision_engine {
+    label = "4. Decision & Golden Record";
+    bgcolor="#E6FFE6";
+
+    Auto_Merge [label="Auto Merge\n(High Confidence > 0.9)", shape=ellipse, fillcolor="#90EE90"];
+    Human_Review [label="Human Review\n(Medium Confidence)", shape=cylinder, fillcolor="#FFB6C1"];
+    Golden_Record_Creator [label="Golden Record Creator\n(Survivorship Rules)", shape=ellipse, fillcolor="#E0F7FA"];
+
+    Confidence_Scoring -> Auto_Merge [label="Score > 0.9"];
+    Confidence_Scoring -> Human_Review [label="0.7 < Score < 0.9"];
+    Auto_Merge -> Golden_Record_Creator;
+    Human_Review -> Golden_Record_Creator [label="After Review"];
+  }
+
+  subgraph cluster_output {
+    label = "5. Output & Distribution";
+    bgcolor="#F0FFFF";
+
+    BQ_Master_Entities [label="BigQuery\nMaster Entities", shape=cylinder, fillcolor="#FFF8E1"];
+    Entity_Mapping [label="Entity Mapping\n(Source → Master)", shape=cylinder, fillcolor="#FFF8E1"];
+    Bigtable_Operational [label="Bigtable\n(Real-time Lookups)", shape=cylinder, fillcolor="#FFF8E1"];
+
+    // Distribution channels
+    Analytics_Platform [label="Analytics Platform\n(BI, ML)", shape=cylinder, fillcolor="#E8F5E9"];
+    Operational_Apps [label="Operational Apps\n(CRM, Marketing)", shape=cylinder, fillcolor="#E8F5E9"];
+    Real_time_APIs [label="Real-time APIs\n(Customer 360)", fillcolor="#E1F5FE"];
+
+    Golden_Record_Creator -> BQ_Master_Entities;
+    Golden_Record_Creator -> Entity_Mapping;
+    Golden_Record_Creator -> Bigtable_Operational;
+
+    BQ_Master_Entities -> Analytics_Platform;
+    Entity_Mapping -> Operational_Apps;
+    Bigtable_Operational -> Real_time_APIs;
+    Real_time_APIs -> Operational_Apps;
+  }
+
+  // Use case examples
+  Use_Cases [label="Use Cases:\n• Banking: Customer 360\n• Retail: Product Catalog\n• Healthcare: Patient Records\n• Travel: Inventory Management\n• Manufacturing: Supplier Data",
+            shape=note, fillcolor="#E6F3FF", style="filled,dashed"];
+
+  // Technology comparison
+  Tech_Comparison [label="Technology Choices:\nBatch: BigQuery (cost-effective, SQL-based)\nStream: Vertex AI ME (low-latency, real-time)\nHybrid: Best of both worlds",
+                   shape=note, fillcolor="#F0FFF0", style="filled,dashed"];
+
+  // Layout hints
+  {rank=same; Files; APIs; Databases}
+  {rank=same; Kafka; PubSub; CDC}
+  {rank=same; Auto_Merge; Human_Review}
+  {rank=same; BQ_Master_Entities; Entity_Mapping; Bigtable_Operational}
+}
