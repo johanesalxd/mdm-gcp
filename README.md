@@ -42,17 +42,17 @@ This repository includes three architectural views to help you understand differ
 ### 1. Complete Architecture (Both Approaches)
 Shows both DIY and Third-Party approaches side-by-side for comparison:
 
-![Complete MDM Architecture on GCP](mdm_architecture.png)
+![Complete MDM Architecture on GCP](images/mdm_architecture.png)
 
 ### 2. GCP Native Architecture (DIY Approach)
 Focuses exclusively on the DIY approach using only GCP services:
 
-![GCP Native MDM Architecture](mdm_architecture_gcp.png)
+![GCP Native MDM Architecture](images/mdm_architecture_gcp.png)
 
 ### 3. Third-Party Architecture (Tamr/Reltio/Informatica)
 Shows integration with third-party MDM tools:
 
-![Third-Party MDM Architecture](mdm_architecture_3pt.png)
+![Third-Party MDM Architecture](images/mdm_architecture_3pt.png)
 
 ## Table of Contents
 
@@ -128,32 +128,32 @@ The repository contains three DOT source files. You can generate the diagram ima
 **To generate all PNG images:**
 ```bash
 # Complete architecture (both approaches)
-dot -Tpng mdm_architecture.dot -o mdm_architecture.png
+dot -Tpng mdm_architecture.dot -o images/mdm_architecture.png
 
 # GCP Native (DIY) architecture
-dot -Tpng mdm_architecture_gcp.dot -o mdm_architecture_gcp.png
+dot -Tpng mdm_architecture_gcp.dot -o images/mdm_architecture_gcp.png
 
 # Third-Party architecture
-dot -Tpng mdm_architecture_3pt.dot -o mdm_architecture_3pt.png
+dot -Tpng mdm_architecture_3pt.dot -o images/mdm_architecture_3pt.png
 ```
 
 **To generate all SVG images:**
 ```bash
 # Complete architecture (both approaches)
-dot -Tsvg mdm_architecture.dot -o mdm_architecture.svg
+dot -Tsvg mdm_architecture.dot -o images/mdm_architecture.svg
 
 # GCP Native (DIY) architecture
-dot -Tsvg mdm_architecture_gcp.dot -o mdm_architecture_gcp.svg
+dot -Tsvg mdm_architecture_gcp.dot -o images/mdm_architecture_gcp.svg
 
 # Third-Party architecture
-dot -Tsvg mdm_architecture_3pt.dot -o mdm_architecture_3pt.svg
+dot -Tsvg mdm_architecture_3pt.dot -o images/mdm_architecture_3pt.svg
 ```
 
 **To generate all diagrams at once:**
 ```bash
 # Generate all PNG files
 for file in mdm_architecture*.dot; do
-    dot -Tpng "$file" -o "${file%.dot}.png"
+    dot -Tpng "$file" -o "images/${file%.dot}.png"
 done
 ```
 
