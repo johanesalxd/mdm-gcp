@@ -180,9 +180,6 @@ digraph Unified_MDM_Architecture {
   Tech_Comparison [label="Technology Choices:\nBatch: BigQuery (cost-effective, SQL-based)\nStream: Vertex AI ME (low-latency, real-time)\nHybrid: Best of both worlds",
                    shape=note, fillcolor="#F0FFF0", style="filled,dashed"];
 
-  // Layout hints
-  {rank=same; Files; APIs; Databases}
-  {rank=same; Kafka; PubSub; CDC}
+  // Layout hints (removed conflicting rank constraints for nodes in clusters)
   {rank=same; Auto_Merge; Human_Review}
-  {rank=same; BQ_Master_Entities; Entity_Mapping; Bigtable_Operational}
 }
