@@ -23,11 +23,14 @@ Sources [label="Source Systems\n(CRM, ERP, Files)", shape=cylinder, fillcolor="#
     GCS_Landing [label="GCS Landing Zone", shape=cylinder, fillcolor="#FFF8E1"];
     PubSub [label="Pub/Sub", fillcolor="#E1F5FE"];
 Dataflow [label="Dataflow / \nCloud Data Fusion", fillcolor="#E1F5FE"];
+    BQ_DataTransfer [label="BQ Data Transfer\nService", fillcolor="#E1F5FE"];
 
     Sources -> GCS_Landing [label="Batch/Files"];
     Sources -> PubSub [label="Real-time"];
+    Sources -> BQ_DataTransfer [label="SaaS/Scheduled"];
     PubSub -> Dataflow [label="Streaming"];
 GCS_Landing -> Dataflow [label="Batch"];
+    BQ_DataTransfer -> BQ_Staging [label="Direct Load"];
   }
 
   subgraph cluster_processing {
@@ -51,6 +54,7 @@ subgraph cluster_matching {
 BQ_SQL_Match [label="BQ SQL Match\n(Rules, Fuzzy)", fillcolor="#E1F5FE"];
             VertexAI_Embed [label="Vertex AI Embeddings", fillcolor="#E1F5FE"];
             BQ_VectorSearch [label="BQ VECTOR_SEARCH", fillcolor="#E1F5FE"];
+            BQ_EntityRes [label="BQ Entity Resolution\n(e.g., LiveRamp)", fillcolor="#E1F5FE"];
             Match_Results [label="Match Groups", shape=ellipse, fillcolor="#E0F7FA"];
 }
 
@@ -63,9 +67,11 @@ BQ_Staging -> Dataplex_DQ [label="Quality Checks"];
         BQ_Staging -> BQ_SQL_Match;
 BQ_Staging -> VertexAI_Embed -> BQ_VectorSearch;
         BQ_Staging -> BQ_VectorSearch;
+        BQ_Staging -> BQ_EntityRes;
 
         BQ_SQL_Match -> Match_Results;
         BQ_VectorSearch -> Match_Results;
+        BQ_EntityRes -> Match_Results;
 
         // --- Modified DIY Data Flow ---
         // High-confidence matches go straight to writing
@@ -107,9 +113,12 @@ Tamr -> GCS_Landing [style=dashed, label="Config/Logs"];
     Dataplex_Catalog [label="Dataplex\n(Catalog, Lineage, Glossary)", fillcolor="#E1F5FE"];
 IAM [label="Cloud IAM\n(Access Control)", fillcolor="#E1F5FE"];
     BQ_Security [label="BigQuery Security\n(Row/Col Level)", fillcolor="#E1F5FE"];
+    Cloud_DLP [label="Cloud DLP\n(PII Detection & Masking)", fillcolor="#E1F5FE"];
 
     BQ_Golden -> Dataplex_Catalog;
     BQ_Tamr_Output -> Dataplex_Catalog;
+    BQ_Golden -> Cloud_DLP [style=dashed, label="Scan & Classify"];
+    BQ_Tamr_Output -> Cloud_DLP [style=dashed, label="Scan & Classify"];
     Dataplex_Catalog -> IAM [style=dashed];
 Dataplex_Catalog -> BQ_Security [style=dashed];
   }
@@ -121,13 +130,18 @@ Consuming_Systems [label="Consuming Systems\n(Apps, Analytics)", shape=cylinder,
     Looker [label="Looker", fillcolor="#E1F5FE"];
     Apigee [label="Apigee (APIs)", fillcolor="#E1F5FE"];
     PubSub_Changes [label="Pub/Sub (Change Events)", fillcolor="#E1F5FE"];
+    CloudSQL_Spanner [label="Cloud SQL/Spanner\n(Operational Store)", shape=cylinder, fillcolor="#FFF8E1"];
+
 BQ_Golden -> Looker;
     BQ_Golden -> Apigee -> Consuming_Systems;
     BQ_Golden -> PubSub_Changes -> Consuming_Systems;
+    BQ_Golden -> CloudSQL_Spanner [label="Syndicate"];
+    CloudSQL_Spanner -> Consuming_Systems [label="Low-latency\nLookups"];
 
     BQ_Tamr_Output -> Looker;
     BQ_Tamr_Output -> Apigee;
 BQ_Tamr_Output -> PubSub_Changes;
+    BQ_Tamr_Output -> CloudSQL_Spanner;
 
     // Connect rules to the new write step
     Survivorship_Rules -> Write_Mastered_Data [label="Apply Rules"];
