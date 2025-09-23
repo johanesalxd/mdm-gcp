@@ -3,7 +3,7 @@ BigQuery Utilities for MDM
 Helper functions for BigQuery operations and SQL query generation
 """
 
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 from google.cloud import bigquery
 import pandas as pd
@@ -435,8 +435,89 @@ def generate_business_rules_sql(table_name: str) -> str:
     """
 
 
+def generate_ai_natural_language_matching_sql(table_name: str, model_name: str) -> str:
+    """Generate SQL for AI natural language matching using Gemini 2.5 Pro"""
+    return f"""
+    CREATE OR REPLACE TABLE `{table_name}_ai_natural_language_matches` AS
+    WITH customer_pairs AS (
+      SELECT
+        a.record_id as record1_id,
+        b.record_id as record2_id,
+        a.source_system as source1,
+        b.source_system as source2,
+        a.full_name_clean as name1,
+        a.email_clean as email1,
+        a.phone_clean as phone1,
+        a.address_clean as address1,
+        b.full_name_clean as name2,
+        b.email_clean as email2,
+        b.phone_clean as phone2,
+        b.address_clean as address2
+      FROM `{table_name}` a
+      CROSS JOIN `{table_name}` b
+      WHERE a.record_id < b.record_id
+      LIMIT 50  -- Start with small batch for testing
+    ),
+    ai_matches AS (
+      SELECT
+        record1_id,
+        record2_id,
+        source1,
+        source2,
+        ROUND(SAFE_CAST(similarity_score AS FLOAT64), 6) as similarity_score,
+        ROUND(SAFE_CAST(confidence AS FLOAT64), 6) as confidence,
+        explanation
+      FROM AI.GENERATE_TABLE(
+        MODEL `{model_name}`,
+        (
+          SELECT
+            CONCAT(
+              'Compare the similarity between the following two customer records and provide: ',
+              '1. A similarity score (0-1). ',
+              '2. A confidence score (0-1) for your assessment. ',
+              '3. A brief explanation for your confidence level. ',
+              'Record 1: Name: ', COALESCE(name1, ''),
+              ', Email: ', COALESCE(email1, ''),
+              ', Phone: ', COALESCE(phone1, ''),
+              ', Address: ', COALESCE(address1, ''), '. ',
+              'Record 2: Name: ', COALESCE(name2, ''),
+              ', Email: ', COALESCE(email2, ''),
+              ', Phone: ', COALESCE(phone2, ''),
+              ', Address: ', COALESCE(address2, '')
+            ) AS prompt,
+            record1_id,
+            record2_id,
+            source1,
+            source2
+          FROM customer_pairs
+        ),
+        STRUCT(
+          "similarity_score FLOAT64, confidence FLOAT64, explanation STRING"
+          AS output_schema
+        )
+      )
+      WHERE SAFE_CAST(similarity_score AS FLOAT64) > 0.4  -- Balanced threshold for ensemble
+        AND SAFE_CAST(confidence AS FLOAT64) > 0.6        -- Ensure AI is confident
+    )
+    SELECT
+      record1_id,
+      record2_id,
+      source1,
+      source2,
+      LEAST(GREATEST(COALESCE(similarity_score, 0.0), 0.0), 1.0) as ai_score,
+      LEAST(GREATEST(COALESCE(confidence, 0.0), 0.0), 1.0) as confidence,
+      explanation,
+      CURRENT_TIMESTAMP() as processed_at
+    FROM ai_matches
+    WHERE similarity_score IS NOT NULL
+      AND confidence IS NOT NULL
+      AND similarity_score BETWEEN 0.0 AND 1.0
+      AND confidence BETWEEN 0.0 AND 1.0
+    """
+
+
 def generate_combined_scoring_sql(dataset_ref: str, table_name: str) -> str:
-    """Generate SQL for combining all match scores"""
+    """Generate SQL for combining all match scores including AI natural language matching (5 strategies)"""
     return f"""
     CREATE OR REPLACE TABLE `{dataset_ref}.{table_name}_combined_matches` AS
     WITH all_pairs AS (
@@ -449,6 +530,8 @@ def generate_combined_scoring_sql(dataset_ref: str, table_name: str) -> str:
         SELECT record1_id, record2_id, source1, source2 FROM `{dataset_ref}.{table_name}_vector_matches`
         UNION DISTINCT
         SELECT record1_id, record2_id, source1, source2 FROM `{dataset_ref}.{table_name}_business_matches`
+        UNION DISTINCT
+        SELECT record1_id, record2_id, source1, source2 FROM `{dataset_ref}.{table_name}_ai_natural_language_matches`
       )
     ),
     combined_scores AS (
@@ -458,7 +541,7 @@ def generate_combined_scoring_sql(dataset_ref: str, table_name: str) -> str:
         p.source1,
         p.source2,
 
-        -- Get scores from each matching strategy
+        -- Get scores from each matching strategy (5 strategies)
         COALESCE(e.exact_overall_score, 0.0) AS exact_score,
         COALESCE(f.fuzzy_overall_score, 0.0) AS fuzzy_score,
         COALESCE(v.vector_similarity_score, 0.0) AS vector_score,
@@ -466,15 +549,19 @@ def generate_combined_scoring_sql(dataset_ref: str, table_name: str) -> str:
           b.same_company_score + b.same_location_score +
           b.age_compatibility_score + b.income_compatibility_score, 0.0
         ) AS business_score,
+        COALESCE(ai.ai_score, 0.0) AS ai_score,
+        ai.explanation as ai_explanation,
 
-        -- Calculate weighted combined score
-        (0.4 * COALESCE(e.exact_overall_score, 0.0) +
-         0.3 * COALESCE(f.fuzzy_overall_score, 0.0) +
-         0.2 * COALESCE(v.vector_similarity_score, 0.0) +
-         0.1 * COALESCE(
+        -- Calculate weighted combined score (5-strategy ensemble)
+        -- Weights: Exact 30%, Fuzzy 25%, Vector 20%, Business 15%, AI 10%
+        (0.30 * COALESCE(e.exact_overall_score, 0.0) +
+         0.25 * COALESCE(f.fuzzy_overall_score, 0.0) +
+         0.20 * COALESCE(v.vector_similarity_score, 0.0) +
+         0.15 * COALESCE(
            b.same_company_score + b.same_location_score +
            b.age_compatibility_score + b.income_compatibility_score, 0.0
-         )) AS combined_score
+         ) +
+         0.10 * COALESCE(ai.ai_score, 0.0)) AS combined_score
 
       FROM all_pairs p
       LEFT JOIN `{dataset_ref}.{table_name}_exact_matches` e
@@ -485,23 +572,25 @@ def generate_combined_scoring_sql(dataset_ref: str, table_name: str) -> str:
         ON p.record1_id = v.record1_id AND p.record2_id = v.record2_id
       LEFT JOIN `{dataset_ref}.{table_name}_business_matches` b
         ON p.record1_id = b.record1_id AND p.record2_id = b.record2_id
+      LEFT JOIN `{dataset_ref}.{table_name}_ai_natural_language_matches` ai
+        ON p.record1_id = ai.record1_id AND p.record2_id = ai.record2_id
     )
     SELECT
       *,
-      -- Calculate confidence and decision
+      -- Calculate confidence and decision with adjusted thresholds
       CASE
-        WHEN combined_score >= 0.9 THEN 'auto_merge'
-        WHEN combined_score >= 0.7 THEN 'human_review'
+        WHEN combined_score >= 0.8 THEN 'auto_merge'
+        WHEN combined_score >= 0.6 THEN 'human_review'
         ELSE 'no_match'
       END AS match_decision,
 
       CASE
-        WHEN combined_score >= 0.9 THEN 'high'
-        WHEN combined_score >= 0.7 THEN 'medium'
+        WHEN combined_score >= 0.8 THEN 'high'
+        WHEN combined_score >= 0.6 THEN 'medium'
         ELSE 'low'
       END AS confidence_level
 
     FROM combined_scores
-    WHERE combined_score > 0.5  -- Only keep meaningful matches
+    WHERE combined_score > 0.3  -- Lower threshold to include more potential matches
     ORDER BY combined_score DESC
     """
