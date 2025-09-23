@@ -456,7 +456,7 @@ def generate_ai_natural_language_matching_sql(table_name: str, model_name: str) 
       FROM `{table_name}` a
       CROSS JOIN `{table_name}` b
       WHERE a.record_id < b.record_id
-      LIMIT 50  -- Start with small batch for testing
+      LIMIT 500  -- Start with small batch for testing
     ),
     ai_matches AS (
       SELECT
