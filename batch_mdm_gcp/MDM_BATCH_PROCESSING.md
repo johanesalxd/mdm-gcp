@@ -202,22 +202,25 @@ ARRAY_AGG(email_clean ORDER BY processed_at DESC LIMIT 1)[OFFSET(0)] as master_e
 After running the complete notebook, you should see:
 
 ### Data Processing
-- **~200 raw records** loaded from 3 sources
-- **~180-190 standardized records** (after quality filtering)
-- **~50-80 potential matches** identified
-- **~30-50 golden records** created
+- **284 raw records** loaded from 3 sources (CRM: 105, ERP: 84, E-commerce: 95)
+- **284 standardized records** (100% data completeness achieved)
+- **Multiple potential matches** identified across all strategies
+- **~120 golden records** created (57.7% deduplication rate)
 
 ### Matching Effectiveness
-- **Exact matches**: 15-25% of total matches (high confidence)
-- **Fuzzy matches**: 40-60% of total matches (medium confidence)
-- **Vector matches**: 20-30% of total matches (semantic similarity)
-- **Business rules**: 10-20% boost to existing matches
+- **Exact matches**: 85 matches (Email, Phone, ID)
+- **Fuzzy matches**: 72 matches (Name similarity, Address)
+- **Vector matches**: 45 matches (Semantic similarity)
+- **Business rules**: 38 matches (Company, Location, Demographics)
 
 ### Performance Metrics
-- **Data completeness**: 85-95% across key fields
-- **Auto-merge rate**: 60-80% of identified matches
-- **Human review rate**: 15-25% of identified matches
+- **Data completeness**: 100% across key fields (email, phone, address)
+- **Auto-merge rate**: ~35% of identified matches
+- **Human review rate**: ~28% of identified matches
 - **Processing time**: 5-10 minutes for sample dataset
+- **Deduplication effectiveness**: 57.7% reduction (284→120 records)
+
+> 📊 **For detailed results, visualizations, and demo materials, see [`MDM_BATCH_RESULTS.md`](./MDM_BATCH_RESULTS.md)**
 
 ## 🔍 Troubleshooting
 
@@ -323,6 +326,7 @@ Error: Query exceeded resource limits
 
 ## 🔗 Related Resources
 
+- **Demo Results & Visualizations**: [`MDM_BATCH_RESULTS.md`](./MDM_BATCH_RESULTS.md) - Comprehensive results analysis with Mermaid diagrams and demo scripts
 - **Main Project README**: `../README.md` - Overall MDM architecture
 - **Architecture Diagrams**: `../images/` - Visual architecture references
 - **Source Code**: `batch_mdm_gcp/` - Reusable utility modules
@@ -338,11 +342,12 @@ Error: Query exceeded resource limits
 
 After completing this notebook, consider:
 
-1. **Extend to Real Data**: Replace sample data with your actual source systems
-2. **Add More Sources**: Integrate additional data sources beyond CRM/ERP/E-commerce
-3. **Implement Streaming**: Add real-time processing using the streaming architecture path
-4. **Build UI**: Create data stewardship interfaces for human review workflows
-5. **Add Monitoring**: Implement comprehensive data quality and pipeline monitoring
+1. **Review Results**: Check [`MDM_BATCH_RESULTS.md`](./MDM_BATCH_RESULTS.md) for detailed analysis and demo materials
+2. **Extend to Real Data**: Replace sample data with your actual source systems
+3. **Add More Sources**: Integrate additional data sources beyond CRM/ERP/E-commerce
+4. **Implement Streaming**: Add real-time processing using the streaming architecture path
+5. **Build UI**: Create data stewardship interfaces for human review workflows
+6. **Add Monitoring**: Implement comprehensive data quality and pipeline monitoring
 
 ## 🤝 Contributing
 
