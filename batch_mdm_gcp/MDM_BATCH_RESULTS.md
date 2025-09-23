@@ -197,10 +197,10 @@ graph TB
     GEMINI --> EMBED_TBL
 
     %% 5-Strategy Matching
-    EMBED_TBL --> EXACT_TBL
-    EMBED_TBL --> FUZZY_TBL
+    STAGE --> EXACT_TBL
+    STAGE --> FUZZY_TBL
     EMBED_TBL --> VECTOR_TBL
-    EMBED_TBL --> BUSINESS_TBL
+    STAGE --> BUSINESS_TBL
     GEMINI_PRO --> AI_TBL
 
     %% Ensemble Combination
