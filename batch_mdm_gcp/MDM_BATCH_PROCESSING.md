@@ -59,7 +59,7 @@ The notebook generates **200+ realistic customer records** representing:
 4. **Run the notebook**:
    ```bash
    # From the project root
-   jupyter lab batch_mdm_gcp/notebook/mdm_batch_processing.ipynb
+   jupyter lab batch_mdm_gcp/mdm_batch_processing.ipynb
    ```
 
 ## 📋 Pipeline Steps
