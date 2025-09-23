@@ -121,15 +121,15 @@ xychart-beta
     title "5-Strategy Matching Effectiveness"
     x-axis ["Exact Matching", "Fuzzy Matching", "Vector Matching", "Business Rules", "AI Natural Language"]
     y-axis "Matches Found" 0 --> 100
-    bar [85, 72, 45, 38, 28]
+    bar [86, 73, 42, 76, 22]
 ```
 
 ### Enhanced Strategy Breakdown
-- **Exact Matching**: 85 matches (Email, Phone, ID) - Perfect precision
-- **Fuzzy Matching**: 72 matches (Name similarity, Address) - Handles variations
-- **Vector Matching**: 45 matches (Semantic similarity) - AI understanding
-- **Business Rules**: 38 matches (Company, Location, Demographics) - Domain logic
-- **AI Natural Language**: 28 matches (Direct AI comparison) - Human-like reasoning
+- **Exact Matching**: 86 matches (Email: 17, Phone: 69, ID: 0) - Perfect precision
+- **Fuzzy Matching**: 73 matches (Name: 0.752, Address: 0.700 avg scores) - Handles variations
+- **Vector Matching**: 42 matches (Avg similarity: 0.740) - AI understanding
+- **Business Rules**: 76 matches (Location: 76, Company/Age/Income: 0) - Domain logic
+- **AI Natural Language**: 22 matches (Avg score: 0.677, Confidence: 0.816) - Human-like reasoning
 
 ---
 
@@ -137,15 +137,15 @@ xychart-beta
 
 ```mermaid
 pie title Match Decision Distribution
-    "Auto Merge (≥0.8)" : 35
-    "Human Review (0.6-0.8)" : 28
-    "No Match (<0.6)" : 37
+    "Auto Merge (≥0.8)" : 42
+    "Human Review (0.6-0.8)" : 58
+    "No Match (<0.6)" : 0
 ```
 
 ### Decision Outcomes
-- **35% Auto-merge**: High confidence matches (score ≥ 0.8)
-- **28% Human review**: Medium confidence (0.6-0.8)
-- **37% No match**: Low confidence (<0.6)
+- **42% Auto-merge**: High confidence matches (score ≥ 0.8)
+- **58% Human review**: Medium confidence (0.6-0.8)
+- **0% No match**: Low confidence (<0.6)
 
 ---
 
@@ -275,20 +275,20 @@ graph TB
 
 #### 5-Strategy Matching Engine
 ```
-⚡ Exact Matching: 85 matches (Email, Phone, ID)
-🔍 Fuzzy Matching: 72 matches (Name, Address similarity)
-🧮 Vector Matching: 45 matches (Semantic similarity)
-📋 Business Rules: 38 matches (Company, Location, Demographics)
-🤖 AI Natural Language: 28 matches (Direct AI comparison with explanations)
+⚡ Exact Matching: 86 matches (Email: 17, Phone: 69, ID: 0)
+🔍 Fuzzy Matching: 73 matches (Name: 0.752, Address: 0.700 avg scores)
+🧮 Vector Matching: 42 matches (Avg similarity: 0.740)
+📋 Business Rules: 76 matches (Location: 76, Company/Age/Income: 0)
+🤖 AI Natural Language: 22 matches (Avg score: 0.677, Confidence: 0.816)
 ```
 
 #### Enhanced Confidence Scoring & Decisions
 ```
 🎲 5-strategy weighted ensemble scoring (Exact:30%, Fuzzy:25%, Vector:20%, Business:15%, AI:10%)
 ⚖️ Automated decision making with AI explanations:
-   • 35% Auto-merge (high confidence ≥0.8)
-   • 28% Human review (medium confidence 0.6-0.8)
-   • 37% No match (low confidence <0.6)
+   • 42% Auto-merge (high confidence ≥0.8)
+   • 58% Human review (medium confidence 0.6-0.8)
+   • 0% No match (low confidence <0.6)
 ```
 
 #### AI Natural Language Explanations
@@ -347,6 +347,52 @@ graph TB
 
 ---
 
+## 🔢 Cross Join Calculation & AI Call Frequency
+
+### Understanding the CROSS JOIN Impact
+
+The AI Natural Language matching strategy uses a **CROSS JOIN** to compare every customer record with every other record, but with smart optimizations to control costs and processing time.
+
+#### **Basic Calculation**
+```sql
+-- Without optimization: N × N total combinations
+284 records × 284 records = 80,656 total combinations
+
+-- With WHERE a.record_id < b.record_id optimization
+284 × 283 ÷ 2 = 40,186 unique pairs (eliminates duplicates & self-matches)
+```
+
+#### **Current Implementation (LIMIT 500)**
+```sql
+-- AI processing with LIMIT 500
+500 customer pairs → 500 Gemini 2.5 Pro API calls
+Processing time: ~2-5 minutes
+Cost: Moderate (500 AI inferences)
+```
+
+#### **Full Dataset Implications**
+```sql
+-- Without LIMIT (full dataset)
+40,186 customer pairs → 40,186 Gemini 2.5 Pro API calls
+Processing time: ~2-4 hours (estimated)
+Cost: 80x higher than current implementation
+```
+
+### **Optimization Benefits**
+
+| Approach | Pairs Processed | AI Calls | Cost Factor | Use Case |
+|----------|----------------|----------|-------------|----------|
+| **Demo (LIMIT 500)** | 500 | 500 | 1x | Testing, demos |
+| **Batch (LIMIT 5,000)** | 5,000 | 5,000 | 10x | Development |
+| **Full Dataset** | 40,186 | 40,186 | 80x | Production |
+
+### **Scaling Strategies**
+- **Batch Processing**: Process in chunks of 500-5,000 pairs
+- **Pre-filtering**: Add business rules to reduce candidate pairs
+- **Progressive Approach**: Start small, scale based on results
+
+---
+
 ## 📊 Performance Metrics
 
 ### Data Quality Metrics
@@ -361,10 +407,10 @@ graph TB
 ### Matching Effectiveness
 | Metric | Value |
 |--------|-------|
-| Total Potential Matches | 142 |
-| Auto-merge Rate | 35% |
-| Human Review Rate | 28% |
-| Average Match Score | 0.756 |
+| Total Potential Matches | 180 |
+| Auto-merge Rate | 42.22% |
+| Human Review Rate | 57.78% |
+| Average Match Score | 0.705 |
 
 ### Pipeline Performance
 | Stage | Input Records | Output Records | Reduction |
