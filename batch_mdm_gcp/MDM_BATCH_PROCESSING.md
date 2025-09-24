@@ -114,9 +114,10 @@ The notebook walks through each step of the MDM pipeline:
 - Automated decision making (auto-merge vs. human review)
 
 ### 9. **Golden Record Creation**
-- Apply survivorship rules to select best values
-- Create master entities with metadata tracking
-- Generate entity mapping tables
+- **Entity Clustering**: Use transitive closure to group all connected matching records
+- **Survivorship Rules**: Apply data quality rules to select best values within each cluster
+- **Master Entity Creation**: Generate one golden record per unique entity (not per source record)
+- **Source Lineage**: Track all contributing source records and systems
 
 ### 10. **Analysis & Visualization**
 - Pipeline performance metrics

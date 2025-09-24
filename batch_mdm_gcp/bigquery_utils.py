@@ -594,3 +594,175 @@ def generate_combined_scoring_sql(dataset_ref: str, table_name: str) -> str:
     WHERE combined_score > 0.3  -- Lower threshold to include more potential matches
     ORDER BY combined_score DESC
     """
+
+
+def generate_golden_record_sql(dataset_ref: str, table_name: str) -> str:
+    """Generate SQL for creating golden records with proper entity clustering and deterministic IDs"""
+    return f"""
+    CREATE OR REPLACE TABLE `{dataset_ref}.golden_records` AS
+    WITH
+    -- Step 1: Get all matching pairs above threshold for clustering
+    match_pairs AS (
+      SELECT
+        record1_id,
+        record2_id,
+        combined_score
+      FROM `{dataset_ref}.{table_name}_combined_matches`
+      WHERE match_decision IN ('auto_merge', 'human_review')
+        AND combined_score >= 0.6  -- Minimum threshold for clustering
+    ),
+
+    -- Step 2: Create bidirectional edges for graph traversal
+    edges AS (
+      SELECT record1_id as node1, record2_id as node2 FROM match_pairs
+      UNION ALL
+      SELECT record2_id as node1, record1_id as node2 FROM match_pairs
+    ),
+
+    -- Step 3: Find connected components using iterative approach
+    -- Start with each node as its own cluster
+    initial_clusters AS (
+      SELECT DISTINCT
+        node1 as record_id,
+        node1 as cluster_id
+      FROM edges
+
+      UNION DISTINCT
+
+      -- Include unmatched records as their own clusters
+      SELECT
+        record_id,
+        record_id as cluster_id
+      FROM `{dataset_ref}.{table_name}`
+      WHERE record_id NOT IN (
+        SELECT node1 FROM edges
+        UNION DISTINCT
+        SELECT node2 FROM edges
+      )
+    ),
+
+    -- Step 4: Propagate cluster IDs through connected components
+    -- This implements a simplified transitive closure
+    propagated_clusters AS (
+      SELECT DISTINCT
+        c1.record_id,
+        MIN(LEAST(c1.cluster_id, c2.cluster_id)) OVER (
+          PARTITION BY c1.record_id
+        ) as final_cluster_id
+      FROM initial_clusters c1
+      LEFT JOIN edges e ON c1.record_id = e.node1
+      LEFT JOIN initial_clusters c2 ON e.node2 = c2.record_id
+    ),
+
+    -- Step 5: Ensure all connected records have the same cluster ID
+    -- by taking the minimum cluster ID for each connected component
+    final_clusters AS (
+      SELECT DISTINCT
+        pc1.record_id,
+        MIN(pc2.final_cluster_id) as cluster_id
+      FROM propagated_clusters pc1
+      LEFT JOIN edges e ON pc1.record_id = e.node1
+      LEFT JOIN propagated_clusters pc2 ON e.node2 = pc2.record_id
+      GROUP BY pc1.record_id
+
+      UNION DISTINCT
+
+      -- Include records with no connections
+      SELECT
+        record_id,
+        final_cluster_id as cluster_id
+      FROM propagated_clusters
+      WHERE record_id NOT IN (SELECT node1 FROM edges)
+    ),
+
+    -- Step 6: Apply survivorship rules within each cluster
+    golden_records_raw AS (
+      SELECT
+        fc.cluster_id,
+        ARRAY_AGG(c.record_id ORDER BY c.processed_at DESC) as source_record_ids,
+
+        -- Name: Most complete (longest)
+        ARRAY_AGG(c.full_name_clean IGNORE NULLS ORDER BY LENGTH(c.full_name_clean) DESC LIMIT 1)[OFFSET(0)] as master_name,
+
+        -- Email: Most recent and complete
+        ARRAY_AGG(c.email_clean IGNORE NULLS ORDER BY c.processed_at DESC LIMIT 1)[OFFSET(0)] as master_email,
+
+        -- Phone: Most recent and complete
+        ARRAY_AGG(c.phone_clean IGNORE NULLS ORDER BY c.processed_at DESC LIMIT 1)[OFFSET(0)] as master_phone,
+
+        -- Address: Most complete
+        ARRAY_AGG(c.address_clean IGNORE NULLS ORDER BY LENGTH(c.address_clean) DESC LIMIT 1)[OFFSET(0)] as master_address,
+        ARRAY_AGG(c.city_clean IGNORE NULLS ORDER BY LENGTH(c.city_clean) DESC LIMIT 1)[OFFSET(0)] as master_city,
+        ARRAY_AGG(c.state_clean IGNORE NULLS ORDER BY LENGTH(c.state_clean) DESC LIMIT 1)[OFFSET(0)] as master_state,
+
+        -- Company: Most recent
+        ARRAY_AGG(c.company IGNORE NULLS ORDER BY c.processed_at DESC LIMIT 1)[OFFSET(0)] as master_company,
+
+        -- Income: Maximum (assuming most recent/accurate)
+        MAX(c.annual_income) as master_income,
+
+        -- Segment: Most recent
+        ARRAY_AGG(c.customer_segment IGNORE NULLS ORDER BY c.processed_at DESC LIMIT 1)[OFFSET(0)] as master_segment,
+
+        -- Metadata
+        COUNT(DISTINCT c.record_id) as source_record_count,
+        ARRAY_AGG(DISTINCT c.source_system IGNORE NULLS ORDER BY c.source_system) as source_systems,
+        MIN(c.registration_date) as first_seen,
+        MAX(c.last_activity_date) as last_activity,
+
+        -- Quality metrics
+        MAX(CASE WHEN c.email_clean IS NOT NULL THEN 1 ELSE 0 END) as has_email,
+        MAX(CASE WHEN c.phone_clean IS NOT NULL THEN 1 ELSE 0 END) as has_phone,
+        MAX(CASE WHEN c.address_clean IS NOT NULL THEN 1 ELSE 0 END) as has_address,
+
+        CURRENT_TIMESTAMP() as created_at,
+        CURRENT_TIMESTAMP() as updated_at
+
+      FROM final_clusters fc
+      JOIN `{dataset_ref}.{table_name}` c ON fc.record_id = c.record_id
+      GROUP BY fc.cluster_id
+    ),
+
+    -- Step 7: Generate deterministic entity IDs (matching streaming logic)
+    golden_records AS (
+      SELECT
+        -- Generate deterministic master_id based on best identifier
+        CASE
+          -- If has email, use hash of email (primary identifier)
+          WHEN master_email IS NOT NULL THEN
+            SUBSTR(TO_HEX(SHA256(CONCAT('email:', master_email))), 1, 36)
+          -- If has phone, use hash of phone (secondary identifier)
+          WHEN master_phone IS NOT NULL THEN
+            SUBSTR(TO_HEX(SHA256(CONCAT('phone:', master_phone))), 1, 36)
+          -- Otherwise, use the cluster_id as fallback
+          ELSE
+            cluster_id
+        END as master_id,
+
+        -- All other fields remain the same
+        source_record_ids,
+        master_name,
+        master_email,
+        master_phone,
+        master_address,
+        master_city,
+        master_state,
+        master_company,
+        master_income,
+        master_segment,
+        source_record_count,
+        source_systems,
+        first_seen,
+        last_activity,
+        has_email,
+        has_phone,
+        has_address,
+        created_at,
+        updated_at
+
+      FROM golden_records_raw
+    )
+
+    SELECT * FROM golden_records
+    ORDER BY source_record_count DESC, master_name
+    """

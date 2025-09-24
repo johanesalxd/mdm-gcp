@@ -3,6 +3,7 @@ Streaming MDM Processor
 Implements 4-way matching for real-time entity resolution
 """
 
+import hashlib
 import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -20,17 +21,20 @@ class StreamingMDMProcessor:
         self.spanner_helper = spanner_helper
         self.embedding_model = embedding_model
 
-        # Matching weights (4-strategy, no AI)
+        # Matching weights (4-strategy, proportionally adjusted from batch)
+        # Original batch: Exact 30%, Fuzzy 25%, Vector 20%, Business 15%, AI 10%
+        # Removing AI (10%), redistribute proportionally among remaining 90%
         self.weights = {
-            'exact': 0.40,      # Increased from 30% (no AI to compensate)
-            'fuzzy': 0.30,      # Increased from 25%
-            'vector': 0.20,     # Same
-            'business': 0.10    # Decreased from 15%
+            'exact': 0.33,      # 30/90 = 33% (was 30% in batch)
+            'fuzzy': 0.28,      # 25/90 = 28% (was 25% in batch)
+            'vector': 0.22,     # 20/90 = 22% (was 20% in batch)
+            'business': 0.17    # 15/90 = 17% (was 15% in batch)
         }
 
-        # Confidence thresholds
-        self.auto_merge_threshold = 0.85
-        self.create_new_threshold = 0.65
+        # Confidence thresholds (aligned with batch)
+        self.auto_merge_threshold = 0.8     # Changed from 0.85 to match batch
+        self.human_review_threshold = 0.6   # Added to match batch
+        self.create_new_threshold = 0.6     # Changed from 0.65 to match batch
 
     def standardize_record(self, record: Dict[str, Any]) -> Dict[str, Any]:
         """Standardize incoming record (matching BigQuery patterns)"""
@@ -369,25 +373,55 @@ class StreamingMDMProcessor:
         }
 
     def make_decision(self, combined_score: float) -> Dict[str, str]:
-        """Make matching decision based on combined score"""
-        if combined_score >= self.auto_merge_threshold:
+        """Make matching decision based on combined score (aligned with batch)"""
+        if combined_score >= self.auto_merge_threshold:  # >= 0.8
             return {
                 'action': 'AUTO_MERGE',
                 'confidence': 'HIGH',
                 'decision': 'auto_merge'
             }
-        elif combined_score >= self.create_new_threshold:
+        elif combined_score >= self.human_review_threshold:  # >= 0.6
             return {
-                'action': 'AUTO_MERGE',  # For demo, treat medium as merge too
+                'action': 'HUMAN_REVIEW',  # Changed from AUTO_MERGE
                 'confidence': 'MEDIUM',
-                'decision': 'auto_merge'
+                'decision': 'human_review'  # Changed to match batch
             }
-        else:
+        else:  # < 0.6
             return {
                 'action': 'CREATE_NEW',
                 'confidence': 'LOW',
-                'decision': 'create_new'
+                'decision': 'no_match'  # Changed to match batch terminology
             }
+
+    def generate_deterministic_entity_id(self, record: Dict[str, Any],
+                                         matched_entity_id: Optional[str] = None) -> str:
+        """
+        Generate deterministic entity ID for consistency between batch and streaming.
+
+        Priority:
+        1. If matching existing entity, use that ID
+        2. If has email, use hash of cleaned email
+        3. If has phone, use hash of cleaned phone
+        4. Otherwise, use UUID (for truly new records without identifiers)
+        """
+        # If matching existing entity, keep the same ID
+        if matched_entity_id:
+            return matched_entity_id
+
+        # Try to create deterministic ID from best identifier
+        if record.get('email_clean'):
+            # Use email as primary identifier
+            hash_input = f"email:{record['email_clean']}"
+            return hashlib.sha256(hash_input.encode()).hexdigest()[:36]
+
+        elif record.get('phone_clean'):
+            # Use phone as secondary identifier
+            hash_input = f"phone:{record['phone_clean']}"
+            return hashlib.sha256(hash_input.encode()).hexdigest()[:36]
+
+        else:
+            # No good identifier, generate UUID
+            return str(uuid.uuid4())
 
     def get_match_counts(self, standardized_record: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -558,8 +592,8 @@ class StreamingMDMProcessor:
             return result
 
     def create_new_golden_record(self, record: Dict[str, Any], embedding: List[float]) -> str:
-        """Create a new golden record"""
-        entity_id = str(uuid.uuid4())
+        """Create a new golden record with deterministic ID"""
+        entity_id = self.generate_deterministic_entity_id(record)
 
         def insert_record(transaction):
             transaction.execute_update(
