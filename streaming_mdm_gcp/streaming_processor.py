@@ -697,3 +697,59 @@ class StreamingMDMProcessor:
 
         self.spanner_helper.database.run_in_transaction(update_record)
         return entity_id
+
+    def store_match_result(self, record: Dict[str, Any], result: Dict[str, Any]) -> str:
+        """Store match result in Spanner for analysis"""
+        match_id = str(uuid.uuid4())
+
+        def insert_match(transaction):
+            transaction.execute_update(
+                """
+                INSERT INTO match_results (
+                    match_id, record1_id, record2_id,
+                    source1, source2,
+                    exact_score, fuzzy_score, vector_score, business_score,
+                    combined_score, confidence_level, match_decision,
+                    matched_at, processing_time_ms
+                ) VALUES (
+                    @match_id, @record1_id, @record2_id,
+                    @source1, @source2,
+                    @exact_score, @fuzzy_score, @vector_score, @business_score,
+                    @combined_score, @confidence_level, @match_decision,
+                    PENDING_COMMIT_TIMESTAMP(), @processing_time_ms
+                )
+                """,
+                params={
+                    'match_id': match_id,
+                    'record1_id': result.get('record_id'),
+                    'record2_id': result.get('matched_entity', ''),
+                    'source1': record.get('source_system', 'unknown'),
+                    'source2': 'golden_entity',
+                    'exact_score': result.get('strategy_scores', {}).get('exact', 0),
+                    'fuzzy_score': result.get('strategy_scores', {}).get('fuzzy', 0),
+                    'vector_score': result.get('strategy_scores', {}).get('vector', 0),
+                    'business_score': result.get('strategy_scores', {}).get('business', 0),
+                    'combined_score': result.get('combined_score', 0),
+                    'confidence_level': result.get('confidence', 'LOW'),
+                    'match_decision': result.get('action', 'ERROR'),
+                    'processing_time_ms': int(result.get('processing_time_ms', 0))
+                },
+                param_types={
+                    'match_id': param_types.STRING,
+                    'record1_id': param_types.STRING,
+                    'record2_id': param_types.STRING,
+                    'source1': param_types.STRING,
+                    'source2': param_types.STRING,
+                    'exact_score': param_types.FLOAT64,
+                    'fuzzy_score': param_types.FLOAT64,
+                    'vector_score': param_types.FLOAT64,
+                    'business_score': param_types.FLOAT64,
+                    'combined_score': param_types.FLOAT64,
+                    'confidence_level': param_types.STRING,
+                    'match_decision': param_types.STRING,
+                    'processing_time_ms': param_types.INT64
+                }
+            )
+
+        self.spanner_helper.database.run_in_transaction(insert_match)
+        return match_id
