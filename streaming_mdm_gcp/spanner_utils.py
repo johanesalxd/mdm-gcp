@@ -181,8 +181,9 @@ class SpannerMDMHelper:
         try:
             print("  🔄 Checking schema status...")
 
-            # Define required tables and indexes
-            required_tables = ["golden_entities", "match_results"]
+            # Define required tables and indexes (including entity_embeddings and staging)
+            required_tables = ["golden_entities", "entity_embeddings",
+                               "new_entities_staging", "match_results"]
             required_indexes = [
                 "idx_master_email", "idx_master_phone",
                 "idx_master_name", "idx_master_company"
@@ -194,6 +195,8 @@ class SpannerMDMHelper:
 
             if tables_exist and indexes_exist:
                 print("  ✅ Schema exists and ready (fast path)")
+                # Check if vector index exists for ENTERPRISE edition
+                self._check_and_create_vector_index()
             else:
                 print("  🔨 Schema missing - creating from scratch (slow path)")
                 self._create_full_schema()
@@ -211,7 +214,8 @@ class SpannerMDMHelper:
 
             # Step 1: Drop existing tables with verification
             print("  📋 Step 1: Dropping existing tables...")
-            tables_to_drop = ["match_results", "golden_entities"]
+            tables_to_drop = ["match_results", "new_entities_staging",
+                              "entity_embeddings", "golden_entities"]
             for table_name in tables_to_drop:
                 self.drop_table_if_exists(table_name)
 
@@ -242,6 +246,25 @@ class SpannerMDMHelper:
                     updated_at TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp=true)
                 ) PRIMARY KEY (entity_id)""",
 
+                # Create separate entity_embeddings table (Option 1 - Recommended)
+                """CREATE TABLE entity_embeddings (
+                    entity_id STRING(36) NOT NULL,
+                    embedding ARRAY<FLOAT64>(vector_length=>3072),
+                    source_system STRING(50),
+                    record_id STRING(100),
+                    created_at TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp=true),
+                    updated_at TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp=true)
+                ) PRIMARY KEY (entity_id)""",
+
+                # Create new_entities_staging table for golden master sync
+                """CREATE TABLE new_entities_staging (
+                    entity_id STRING(36) NOT NULL,
+                    golden_record_data JSON NOT NULL,
+                    source_system STRING(50),
+                    created_at TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp=true),
+                    processed BOOL
+                ) PRIMARY KEY (entity_id)""",
+
                 # Create match_results table
                 """CREATE TABLE match_results (
                     match_id STRING(36) NOT NULL,
@@ -261,9 +284,11 @@ class SpannerMDMHelper:
                 ) PRIMARY KEY (match_id)"""
             ]
 
+            table_names = ["golden_entities", "entity_embeddings",
+                           "new_entities_staging", "match_results"]
             for i, stmt in enumerate(create_statements):
                 try:
-                    table_name = "golden_entities" if i == 0 else "match_results"
+                    table_name = table_names[i]
                     print(f"    🔨 Creating table: {table_name}")
                     operation = self.database.update_ddl([stmt])
                     operation.result(timeout=60)
@@ -284,7 +309,7 @@ class SpannerMDMHelper:
             for i, stmt in enumerate(index_statements):
                 try:
                     index_name = stmt.split()[2]  # Extract index name
-                    print(f"    📊 Creating index: {index_name}")
+                    print(f"    � Creating index: {index_name}")
                     operation = self.database.update_ddl([stmt])
                     operation.result(timeout=60)
                     print(f"    ✅ Index {index_name} created successfully")
@@ -514,4 +539,241 @@ class SpannerMDMHelper:
             return int(result.iloc[0]['col_0']) if not result.empty else 0
         except Exception as e:
             self.logger.warning(f"Could not get count for {table_name}: {e}")
+            return 0
+
+    def _check_and_create_vector_index(self):
+        """Check and create vector index for ENTERPRISE edition"""
+        try:
+            # Check if vector index exists
+            if self.index_exists("idx_embeddings"):
+                print("  ✅ Vector index already exists")
+                return
+
+            # Try to create vector index (ENTERPRISE edition only)
+            print("  🔄 Attempting to create vector index...")
+            try:
+                vector_index_stmt = """
+                CREATE VECTOR INDEX idx_embeddings
+                ON entity_embeddings(embedding)
+                WHERE embedding IS NOT NULL
+                OPTIONS (distance_type='COSINE')
+                """
+                operation = self.database.update_ddl([vector_index_stmt])
+                operation.result(timeout=INDEX_CREATE_TIMEOUT)
+                print("  ✅ Vector index created successfully (ENTERPRISE edition)")
+            except Exception as e:
+                error_str = str(e).lower()
+                if "vector_length" in error_str:
+                    print(
+                        "  💡 DIAGNOSIS: Missing vector_length constraint in table definition")
+                    print(
+                        "  💡 SOLUTION: Table needs ARRAY<FLOAT64>(vector_length=>3072)")
+                elif "vector index" in error_str and "not supported" in error_str:
+                    print(
+                        "  💡 DIAGNOSIS: STANDARD edition detected - vector indexes not available")
+                elif "vector index" in error_str:
+                    print("  💡 DIAGNOSIS: Vector index syntax or configuration issue")
+                else:
+                    print(
+                        "  💡 DIAGNOSIS: Unknown vector index error - needs investigation")
+
+                print("  ⚠️ Using table scan fallback for vector similarity search")
+
+        except Exception as e:
+            print(f"  ⚠️ Error checking vector index: {e}")
+
+    def sync_embeddings_from_bigquery(self, bq_helper, limit: int = None):
+        """Sync embeddings from BigQuery ML to Spanner entity_embeddings table"""
+        try:
+            print("  🔄 Syncing embeddings from BigQuery ML...")
+
+            # Query to get embeddings from BigQuery
+            query = f"""
+            SELECT
+                record_id,
+                ml_generate_embedding_result as embedding
+            FROM `{bq_helper.dataset_ref}.customers_with_embeddings`
+            WHERE ml_generate_embedding_result IS NOT NULL
+            """
+
+            if limit:
+                query += f" LIMIT {limit}"
+
+            embeddings_df = bq_helper.execute_query(query)
+
+            if embeddings_df.empty:
+                print("  ⚠️ No embeddings found in BigQuery")
+                return 0
+
+            # Clear existing embeddings (fresh execution)
+            self.clear_table("entity_embeddings")
+
+            # Insert embeddings into Spanner
+            count = 0
+            with self.database.batch() as batch:
+                for _, row in embeddings_df.iterrows():
+                    # Map record_id to entity_id (you may need to adjust this mapping)
+                    entity_id = row['record_id']  # Simplified mapping
+                    embedding = row['embedding']
+
+                    # Validate and convert embedding to list
+                    if embedding is not None:
+                        try:
+                            # Handle numpy arrays and pandas Series
+                            if hasattr(embedding, 'tolist'):
+                                embedding_list = embedding.tolist()
+                            elif isinstance(embedding, (list, tuple)):
+                                embedding_list = list(embedding)
+                            else:
+                                # Skip invalid embeddings
+                                continue
+
+                            # Validate embedding has content
+                            if len(embedding_list) > 0:
+                                batch.insert(
+                                    table="entity_embeddings",
+                                    columns=[
+                                        "entity_id", "embedding", "source_system",
+                                        "record_id", "created_at", "updated_at"
+                                    ],
+                                    values=[[
+                                        entity_id,
+                                        embedding_list,  # Use converted list
+                                        'bigquery_ml',
+                                        row['record_id'],
+                                        spanner.COMMIT_TIMESTAMP,
+                                        spanner.COMMIT_TIMESTAMP
+                                    ]]
+                                )
+                                count += 1
+                        except Exception as e:
+                            print(
+                                f"  ⚠️ Warning: Skipping invalid embedding for {entity_id}: {e}")
+                            continue
+
+            print(f"  ✅ Synced {count} embeddings from BigQuery ML")
+            return count
+
+        except Exception as e:
+            print(f"  ❌ Error syncing embeddings: {e}")
+            raise
+
+    def query_similar_embeddings(self, query_embedding: list, limit: int = 10) -> pd.DataFrame:
+        """Query similar embeddings using native COSINE_DISTANCE"""
+        try:
+            # Handle empty query embeddings (new records without embeddings)
+            if not query_embedding or len(query_embedding) == 0:
+                print("  ℹ️ Empty query embedding - skipping vector search")
+                return pd.DataFrame()
+
+            # Use native Spanner COSINE_DISTANCE function (proven idempotent)
+            query = """
+            SELECT
+                entity_id,
+                COSINE_DISTANCE(embedding, @query_embedding) as distance,
+                (1.0 - COSINE_DISTANCE(embedding, @query_embedding)) as similarity
+            FROM entity_embeddings
+            WHERE embedding IS NOT NULL
+            ORDER BY distance ASC
+            LIMIT @limit
+            """
+
+            params = {
+                'query_embedding': query_embedding,
+                'limit': limit
+            }
+            param_types_dict = {
+                'query_embedding': spanner.param_types.Array(spanner.param_types.FLOAT64),
+                'limit': spanner.param_types.INT64
+            }
+
+            result = self.execute_sql(query, params, param_types_dict)
+            if not result.empty:
+                result.columns = ['entity_id', 'distance', 'similarity']
+
+            return result
+
+        except Exception as e:
+            print(f"  ❌ Error querying similar embeddings: {e}")
+            return pd.DataFrame()
+
+    def get_entity_embedding(self, entity_id: str) -> list:
+        """Get embedding for a specific entity"""
+        try:
+            query = """
+            SELECT embedding
+            FROM entity_embeddings
+            WHERE entity_id = @entity_id
+            """
+
+            params = {'entity_id': entity_id}
+            param_types_dict = {'entity_id': spanner.param_types.STRING}
+
+            result = self.execute_sql(query, params, param_types_dict)
+
+            if not result.empty:
+                return list(result.iloc[0]['col_0'])
+            else:
+                return []
+
+        except Exception as e:
+            print(f"  ❌ Error getting entity embedding: {e}")
+            return []
+
+    def stage_new_entity(self, entity_id: str, golden_record_data: dict, source_system: str = "streaming"):
+        """Stage a new entity for future batch processing"""
+        try:
+            import json
+
+            def clean_json_data(data):
+                """Convert None values to empty strings for Spanner JSON compatibility"""
+                cleaned = {}
+                for key, value in data.items():
+                    if value is None:
+                        cleaned[key] = ""  # Convert None to empty string
+                    else:
+                        cleaned[key] = value
+                return cleaned
+
+            def insert_staging(transaction):
+                # Clean the data before inserting
+                cleaned_data = clean_json_data(golden_record_data)
+
+                transaction.execute_update(
+                    """
+                    INSERT INTO new_entities_staging (
+                        entity_id, golden_record_data, source_system, created_at, processed
+                    ) VALUES (
+                        @entity_id, PARSE_JSON(@golden_record_data), @source_system,
+                        PENDING_COMMIT_TIMESTAMP(), @processed
+                    )
+                    """,
+                    params={
+                        'entity_id': entity_id,
+                        'golden_record_data': json.dumps(cleaned_data),
+                        'source_system': source_system,
+                        'processed': False
+                    },
+                    param_types={
+                        'entity_id': spanner.param_types.STRING,
+                        'golden_record_data': spanner.param_types.STRING,
+                        'source_system': spanner.param_types.STRING,
+                        'processed': spanner.param_types.BOOL
+                    }
+                )
+
+            self.database.run_in_transaction(insert_staging)
+            print(f"  📝 Staged entity {entity_id[:8]}... for batch processing")
+
+        except Exception as e:
+            print(f"  ⚠️ Error staging entity: {e}")
+
+    def get_staging_count(self) -> int:
+        """Get count of unprocessed staged entities"""
+        try:
+            query = "SELECT COUNT(*) FROM new_entities_staging WHERE processed = FALSE"
+            result = self.execute_sql(query)
+            return int(result.iloc[0]['col_0']) if not result.empty else 0
+        except Exception as e:
+            self.logger.warning(f"Could not get staging count: {e}")
             return 0

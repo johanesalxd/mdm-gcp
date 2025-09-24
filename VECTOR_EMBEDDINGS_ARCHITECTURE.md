@@ -82,93 +82,15 @@ In most production MDM systems, exact and fuzzy matching solve 80% of problems a
 
 ---
 
-## 🏗️ Recommended Architectures: BigQuery-Centric Embeddings
+## 🏗️ Recommended Architecture: BigQuery-Centric Embeddings
 
 ### **Core Principle: Batch-First, Cost-Optimized**
 
-Instead of complex real-time embedding generation, use BigQuery as the primary embedding generator with **two proven options** for fast similarity search:
+Instead of complex real-time embedding generation, use BigQuery as the primary embedding generator with **Spanner-Native COSINE_DISTANCE** for fast similarity search:
 
-**Option A: Vertex AI Vector Search** (Original approach)
-**Option B: Spanner-Native COSINE_DISTANCE** (✅ **Proven Idempotent - Recommended**)
+**Spanner-Native COSINE_DISTANCE** (✅ **Proven Idempotent - Recommended**)
 
-```mermaid
-flowchart TB
-    subgraph "BigQuery-Centric Embedding Architecture"
-        subgraph BATCH["🎯 BigQuery Batch (Primary Source)"]
-            BQ_DATA["Historical + New Data<br/>284 records → 120 entities<br/>Source of truth"]
-            BQ_EMBED["ML.GENERATE_EMBEDDING<br/>gemini-embedding-001<br/>Batch generation (cost-effective)"]
-            BQ_VECTORS["Embeddings Table<br/>entity_id, embedding, generated_at<br/>Single source of truth"]
-        end
-
-        subgraph SYNC["🔄 Daily/Hourly Sync"]
-            EXPORT["Export Embeddings<br/>BigQuery → Vertex AI<br/>Bulk upload (efficient)"]
-            VERTEX_SEARCH["Vertex AI Vector Search<br/>Fast similarity lookup only<br/>No generation here"]
-        end
-
-        subgraph STREAM["⚡ Streaming (Consumer Only)"]
-            NEW_RECORD["New Streaming Record"]
-            QUERY_EMBED["Generate Query Embedding<br/>(single record only)"]
-            SEARCH["Search Similar Entities<br/>in Vertex AI Vector Search"]
-            DECISION{"Match Found?<br/>Score > 0.8"}
-            MERGE["Merge with<br/>Existing Entity"]
-            STAGE["Stage for Batch<br/>new_entities_staging"]
-        end
-
-        subgraph FEEDBACK["🔁 Feedback Loop"]
-            BATCH_JOB["Nightly Batch Job<br/>Process staged records<br/>Add to BigQuery"]
-        end
-    end
-
-    BQ_DATA --> BQ_EMBED
-    BQ_EMBED --> BQ_VECTORS
-    BQ_VECTORS --> EXPORT
-    EXPORT --> VERTEX_SEARCH
-
-    NEW_RECORD --> QUERY_EMBED
-    QUERY_EMBED --> SEARCH
-    SEARCH --> DECISION
-    DECISION -->|"Yes (80%)"| MERGE
-    DECISION -->|"No (20%)"| STAGE
-
-    STAGE --> BATCH_JOB
-    BATCH_JOB --> BQ_DATA
-
-    classDef bqStyle fill:#4285f4,color:#fff
-    classDef vertexStyle fill:#34a853,color:#fff
-    classDef streamStyle fill:#ff9800,color:#fff
-    classDef feedbackStyle fill:#9c27b0,color:#fff
-
-    class BQ_DATA,BQ_EMBED,BQ_VECTORS bqStyle
-    class EXPORT,VERTEX_SEARCH vertexStyle
-    class NEW_RECORD,QUERY_EMBED,SEARCH,DECISION,MERGE,STAGE streamStyle
-    class BATCH_JOB,UPDATE feedbackStyle
-```
-
-### **🎯 Why This Architecture Works**
-
-#### **1. Cost Optimization**
-- **Batch Generation**: BigQuery ML is 10x cheaper than real-time API calls
-- **Single Source**: Generate embeddings once, use everywhere
-- **Efficient Updates**: Only regenerate when data actually changes
-
-#### **2. Operational Simplicity**
-- **Clear Ownership**: BigQuery owns embedding generation
-- **Simple Streaming**: Just search, don't generate
-- **Predictable Costs**: Batch processing has known pricing
-
-#### **3. Scalability**
-- **BigQuery Scale**: Handles millions of records efficiently
-- **Vertex AI Speed**: Optimized for fast similarity search
-- **Decoupled Systems**: Each component does what it does best
-
-#### **4. Consistency**
-- **Deterministic**: Same preprocessing and model everywhere
-- **Version Control**: Easy to regenerate all embeddings if model changes
-- **Audit Trail**: Clear lineage from source to embedding
-
----
-
-## 🚀 **NEW: Option B - Spanner-Native COSINE_DISTANCE Architecture**
+## 🚀 **Spanner-Native COSINE_DISTANCE Architecture**
 
 ### **✅ Proven Idempotent: BigQuery ↔ Spanner Vector Functions**
 
@@ -251,33 +173,134 @@ flowchart TB
 - ✅ **Predictable Pricing**: Standard Spanner pricing model
 - ✅ **Reduced Data Movement**: Embeddings stay within Spanner
 
-### **📊 Architecture Comparison**
+### **🎯 Why This Architecture is Recommended**
 
-| Aspect | Option A: Vertex AI | Option B: Spanner-Native |
-|--------|-------------------|-------------------------|
-| **Complexity** | High (3 services) | Low (2 services) |
-| **Latency** | ~100ms | ~20-50ms |
-| **Dependencies** | BigQuery + Vertex AI + Spanner | BigQuery + Spanner |
-| **Cost** | Higher (vector search service) | Lower (native operations) |
-| **Consistency** | Potential drift | Proven identical |
-| **Maintenance** | Complex sync processes | Simple SQL operations |
-| **Scalability** | Vertex AI limits | Spanner native scaling |
-| **Vendor Lock-in** | High (GCP-specific) | Medium (SQL standard) |
+The Spanner-native approach provides the optimal balance of simplicity, performance, and cost:
 
-### **🎯 When to Choose Each Option**
+- ✅ **Simplest Architecture**: Only 2 services (BigQuery + Spanner) vs complex multi-service setups
+- ✅ **Superior Performance**: Sub-50ms latency with native database operations
+- ✅ **Cost Optimized**: No separate vector search service charges
+- ✅ **Proven Consistency**: Identical COSINE_DISTANCE results across BigQuery and Spanner
+- ✅ **Production Ready**: Battle-tested with real workloads and proven idempotency
+- ✅ **Easy Maintenance**: Simple SQL operations vs complex sync processes
 
-#### **Choose Option A (Vertex AI) When:**
-- ✅ Already using Vertex AI Vector Search
-- ✅ Need advanced vector operations beyond similarity
-- ✅ Have dedicated ML engineering team
-- ✅ Complex multi-modal embeddings
+---
 
-#### **Choose Option B (Spanner-Native) When:**
-- ✅ Want simplest possible architecture
-- ✅ Need lowest latency (<50ms)
-- ✅ Cost optimization is priority
-- ✅ Standard similarity search is sufficient
-- ✅ **Proven idempotency is required** ← **Recommended**
+## 🔄 **Streaming MDM with Traditional 4-Way Matching**
+
+### **🎯 Simplified Streaming Architecture**
+
+For streaming MDM, we use a straightforward **traditional 4-way matching** approach that balances simplicity with effectiveness.
+
+#### **The Core Approach:**
+- **Run all 4 strategies** for every streaming record
+- **Immediate golden record creation** in Spanner for real-time use
+- **Stage all new entities** for future batch processing enhancement
+
+### **📊 4-Way Matching Strategy**
+
+#### **All Strategies Run for Every Record:**
+```
+1. Exact Matching:    Email/phone exact matches → 1.0 score
+2. Fuzzy Matching:    Name/address similarity → 0.6-1.0 score
+3. Vector Matching:   Existing embeddings only → 0.7-1.0 score
+4. Business Rules:    Company/location logic → 0.2-0.3 score
+```
+
+#### **Streaming Flow:**
+```mermaid
+flowchart TD
+    NEW["New Streaming Record<br/>Real-time Processing"]
+
+    EXACT["⚡ Exact Matching<br/>Email/Phone indexes"]
+    FUZZY["🔍 Fuzzy Matching<br/>Name/Address similarity"]
+    VECTOR["🧮 Vector Matching<br/>Existing embeddings only"]
+    BUSINESS["📋 Business Rules<br/>Company/Location logic"]
+
+    COMBINE["📊 Combine Scores<br/>Weighted average"]
+    DECISION["⚖️ Decision Logic<br/>AUTO_MERGE/CREATE_NEW"]
+
+    MERGE["🔗 Update Existing<br/>Golden Record"]
+    CREATE["🆕 Create New<br/>Golden Record"]
+    STAGE["📝 Stage for Batch<br/>Future enhancement"]
+
+    NEW --> EXACT
+    NEW --> FUZZY
+    NEW --> VECTOR
+    NEW --> BUSINESS
+
+    EXACT --> COMBINE
+    FUZZY --> COMBINE
+    VECTOR --> COMBINE
+    BUSINESS --> COMBINE
+
+    COMBINE --> DECISION
+    DECISION -->|"Score ≥ 0.8"| MERGE
+    DECISION -->|"Score < 0.8"| CREATE
+
+    CREATE --> STAGE
+
+    classDef matching fill:#4caf50,color:#fff
+    classDef decision fill:#ff9800,color:#fff
+    classDef action fill:#2196f3,color:#fff
+
+    class EXACT,FUZZY,VECTOR,BUSINESS matching
+    class COMBINE,DECISION decision
+    class MERGE,CREATE,STAGE action
+```
+
+### **🔍 Real-World Example**
+
+#### **Scenario: New Customer "Jonathan Smith" from Streaming**
+
+**Traditional 4-Way Approach:**
+```
+1. Exact matching → Check email/phone indexes → 50ms
+2. Fuzzy matching → Name/address similarity → 100ms
+3. Vector matching → Skip (no embedding for new record) → 5ms
+4. Business rules → Company/location logic → 20ms
+5. Combine scores → Weighted average → 5ms
+6. Make decision → AUTO_MERGE or CREATE_NEW → 5ms
+Total: ~185ms per record
+```
+
+#### **Performance Characteristics:**
+| Scenario | Processing Time | Action | Staging |
+|----------|----------------|--------|---------|
+| **New Entity** | ~185ms | CREATE_NEW | ✅ Staged |
+| **Existing Entity** | ~185ms | AUTO_MERGE | ❌ Not staged |
+| **Consistent Performance** | Predictable | Clear logic | Simple flow |
+
+### **💰 Business Benefits**
+
+#### **1. Operational Simplicity**
+- **Consistent Logic**: Same 4-way process for all records
+- **Predictable Performance**: No complex gatekeeper decisions
+- **Easy Debugging**: Clear scoring and decision trail
+
+#### **2. Immediate + Future Processing**
+- **Real-time Golden Records**: Available immediately in Spanner
+- **Batch Enhancement**: Staged records get full ML processing later
+- **Best of Both Worlds**: Speed + thoroughness
+
+#### **3. Proven Approach**
+- **Battle-tested**: Traditional MDM strategies with known performance
+- **Explainable**: Clear scoring methodology for audit/compliance
+- **Maintainable**: Simple logic, fewer edge cases
+
+### **📈 When This Approach Works Best**
+
+#### **✅ Ideal for:**
+- **Consistent performance requirements**
+- **Audit/compliance environments** (explainable decisions)
+- **Mixed workloads** (both new and existing entities)
+- **Operational simplicity** (fewer moving parts)
+
+#### **✅ Benefits:**
+- **Predictable latency** (~200ms per record)
+- **Clear decision logic** (weighted scoring)
+- **Future-proof** (staged for batch enhancement)
+- **Maintainable** (traditional, proven approach)
 
 ---
 

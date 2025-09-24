@@ -17,24 +17,23 @@ import pandas as pd
 class StreamingMDMProcessor:
     """4-way streaming MDM processor with real-time matching"""
 
-    def __init__(self, spanner_helper, embedding_model=None):
+    def __init__(self, spanner_helper):
         self.spanner_helper = spanner_helper
-        self.embedding_model = embedding_model
 
-        # Matching weights (4-strategy, proportionally adjusted from batch)
-        # Original batch: Exact 30%, Fuzzy 25%, Vector 20%, Business 15%, AI 10%
-        # Removing AI (10%), redistribute proportionally among remaining 90%
+        # Matching weights (4-strategy for all records - aligned with real-world patterns)
+        # Vector matching searches existing embeddings, doesn't generate new ones
         self.weights = {
-            'exact': 0.33,      # 30/90 = 33% (was 30% in batch)
-            'fuzzy': 0.28,      # 25/90 = 28% (was 25% in batch)
-            'vector': 0.22,     # 20/90 = 22% (was 20% in batch)
-            'business': 0.17    # 15/90 = 17% (was 15% in batch)
+            'exact': 0.33,      # 33% - exact matches (email, phone, ID)
+            'fuzzy': 0.28,      # 28% - fuzzy string similarity
+            # 22% - semantic similarity (existing embeddings)
+            'vector': 0.22,
+            'business': 0.17    # 17% - business rules and domain logic
         }
 
         # Confidence thresholds (aligned with batch)
-        self.auto_merge_threshold = 0.8     # Changed from 0.85 to match batch
-        self.human_review_threshold = 0.6   # Added to match batch
-        self.create_new_threshold = 0.6     # Changed from 0.65 to match batch
+        self.auto_merge_threshold = 0.8     # >= 0.8 for auto-merge
+        self.human_review_threshold = 0.6   # >= 0.6 for human review
+        self.create_new_threshold = 0.6     # < 0.6 for create new
 
     def standardize_record(self, record: Dict[str, Any]) -> Dict[str, Any]:
         """Standardize incoming record (matching BigQuery patterns)"""
@@ -71,31 +70,6 @@ class StreamingMDMProcessor:
             standardized['state_clean'] = record['state'].upper().strip()
 
         return standardized
-
-    def generate_embedding(self, record: Dict[str, Any]) -> List[float]:
-        """Generate embedding for the record (placeholder for now)"""
-        # For demo purposes, create a simple hash-based embedding
-        # In production, this would call Vertex AI
-        content = ' '.join([
-            record.get('full_name_clean') or '',
-            record.get('email_clean') or '',
-            record.get('address_clean') or '',
-            record.get('city_clean') or '',
-            record.get('company') or ''
-        ])
-
-        # Simple hash-based embedding (768 dimensions)
-        import hashlib
-        hash_obj = hashlib.md5(content.encode())
-        hash_hex = hash_obj.hexdigest()
-
-        # Convert to 768-dimensional vector
-        embedding = []
-        for i in range(768):
-            byte_val = int(hash_hex[i % len(hash_hex)], 16)
-            embedding.append(float(byte_val) / 15.0)  # Normalize to 0-1
-
-        return embedding
 
     def find_exact_matches(self, record: Dict[str, Any]) -> List[Tuple[str, float, str]]:
         """Find exact matches using indexed fields"""
@@ -220,49 +194,34 @@ class StreamingMDMProcessor:
         return max(0.0, similarity)
 
     def find_vector_matches(self, record: Dict[str, Any], embedding: List[float]) -> List[Tuple[str, float, str]]:
-        """Find vector similarity matches (simplified for demo)"""
-        matches = []
+        """Find vector similarity matches using existing embeddings only"""
+        # Skip vector matching if no embedding provided (streaming records don't generate embeddings)
+        if not embedding:
+            print(f"  🧮 Vector matching: Skipped (no embedding for streaming record)")
+            return []
 
-        # For demo purposes, we'll use a simple approach
-        # In production, this would use Spanner's vector search capabilities
+        try:
+            # Use existing spanner function for native COSINE_DISTANCE search
+            similar_entities = self.spanner_helper.query_similar_embeddings(
+                query_embedding=embedding,
+                limit=10
+            )
 
-        # Get a sample of entities to compare against (reduced for demo performance)
-        query = """
-        SELECT entity_id, embedding
-        FROM golden_entities
-        WHERE embedding IS NOT NULL
-        LIMIT 10
-        """
+            matches = []
+            for _, row in similar_entities.iterrows():
+                entity_id = row['entity_id']
+                similarity = row['similarity']
 
-        results = self.spanner_helper.execute_sql(query)
-
-        for _, row in results.iterrows():
-            entity_id = row['col_0']
-            stored_embedding = row['col_1']
-
-            if stored_embedding:
-                # Calculate cosine similarity
-                similarity = self.calculate_cosine_similarity(
-                    embedding, stored_embedding)
-
-                if similarity > 0.8:  # Threshold for vector matches
+                # Threshold for vector matches (lowered for better recall)
+                if similarity > 0.7:
                     matches.append((entity_id, similarity, 'vector'))
 
-        return matches
+            return matches
 
-    def calculate_cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
-        """Calculate cosine similarity between two vectors"""
-        if len(vec1) != len(vec2):
-            return 0.0
-
-        dot_product = sum(a * b for a, b in zip(vec1, vec2))
-        magnitude1 = sum(a * a for a in vec1) ** 0.5
-        magnitude2 = sum(b * b for b in vec2) ** 0.5
-
-        if magnitude1 == 0 or magnitude2 == 0:
-            return 0.0
-
-        return dot_product / (magnitude1 * magnitude2)
+        except Exception as e:
+            # Fail gracefully
+            print(f"  ⚠️ Vector search failed: {e}")
+            return []
 
     def apply_business_rules(self, record: Dict[str, Any]) -> List[Tuple[str, float, str]]:
         """Apply business rules matching"""
@@ -347,7 +306,7 @@ class StreamingMDMProcessor:
                 if entity_id_match == entity_id:
                     scores['business'] = max(scores['business'], score)
 
-            # Calculate weighted combined score
+            # Calculate weighted combined score using 4-way weights
             combined_score = (
                 self.weights['exact'] * scores['exact'] +
                 self.weights['fuzzy'] * scores['fuzzy'] +
@@ -423,52 +382,9 @@ class StreamingMDMProcessor:
             # No good identifier, generate UUID
             return str(uuid.uuid4())
 
-    def get_match_counts(self, standardized_record: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Get match counts for all strategies with cached processing.
-        This method caches the standardized record and embedding to avoid redundant processing.
-        """
-        try:
-            # Generate embedding once for vector matching
-            embedding = self.generate_embedding(standardized_record)
-
-            # Calculate matches for each strategy
-            exact_matches = self.find_exact_matches(standardized_record)
-            fuzzy_matches = self.find_fuzzy_matches(standardized_record)
-            vector_matches = self.find_vector_matches(
-                standardized_record, embedding)
-            business_matches = self.apply_business_rules(standardized_record)
-
-            return {
-                'exact_count': len(exact_matches),
-                'fuzzy_count': len(fuzzy_matches),
-                'vector_count': len(vector_matches),
-                'business_count': len(business_matches),
-                'exact_matches': exact_matches,
-                'fuzzy_matches': fuzzy_matches,
-                'vector_matches': vector_matches,
-                'business_matches': business_matches,
-                'embedding': embedding,
-                'standardized_record': standardized_record
-            }
-        except Exception as e:
-            print(f"  ⚠️ Error calculating match counts: {e}")
-            return {
-                'exact_count': 0,
-                'fuzzy_count': 0,
-                'vector_count': 0,
-                'business_count': 0,
-                'exact_matches': [],
-                'fuzzy_matches': [],
-                'vector_matches': [],
-                'business_matches': [],
-                'embedding': [],
-                'standardized_record': standardized_record
-            }
-
     def process_record(self, record: Dict[str, Any], record_num: int, total_records: int, include_match_details: bool = False) -> Dict[str, Any]:
         """
-        Process a single streaming record with 4-way matching.
+        Process a single streaming record with traditional 4-way matching.
 
         Args:
             record: The input record to process
@@ -484,51 +400,41 @@ class StreamingMDMProcessor:
         print(f"📨 Record {record_num}/{total_records}: {record.get('full_name', 'Unknown')} ({record.get('email', 'No email')}) - {record.get('source_system', 'Unknown')} Source")
 
         try:
-            # Step 1: Standardize record once and cache it
+            # Step 1: Standardize record
             standardized = self.standardize_record(record)
 
-            # Step 2: Get cached match details if requested
-            if include_match_details:
-                match_details = self.get_match_counts(standardized)
-                exact_matches = match_details['exact_matches']
-                fuzzy_matches = match_details['fuzzy_matches']
-                vector_matches = match_details['vector_matches']
-                business_matches = match_details['business_matches']
-                embedding = match_details['embedding']
-            else:
-                # Step 2: Generate embedding
-                embedding = self.generate_embedding(standardized)
-
-                # Step 3: Run 4-way matching
-                exact_matches = self.find_exact_matches(standardized)
-                fuzzy_matches = self.find_fuzzy_matches(standardized)
-                vector_matches = self.find_vector_matches(
-                    standardized, embedding)
-                business_matches = self.apply_business_rules(standardized)
+            # Step 2: Run ALL 4 strategies for every record (no gatekeeper)
+            exact_matches = self.find_exact_matches(standardized)
+            fuzzy_matches = self.find_fuzzy_matches(standardized)
+            vector_matches = self.find_vector_matches(
+                standardized, [])  # Use existing embeddings only
+            business_matches = self.apply_business_rules(standardized)
 
             print(f"  ⚡ Exact matching: {len(exact_matches)} matches found")
             print(f"  🔍 Fuzzy matching: {len(fuzzy_matches)} matches found")
             print(f"  🧮 Vector matching: {len(vector_matches)} matches found")
             print(f"  📋 Business rules: {len(business_matches)} matches found")
 
-            # Step 4: Combine scores
+            # Step 3: Combine scores from all 4 strategies
             match_result = self.combine_scores(
                 exact_matches, fuzzy_matches, vector_matches, business_matches)
 
-            # Step 5: Make decision
+            # Step 4: Make decision
             decision = self.make_decision(match_result['combined_score'])
 
             print(
                 f"  📊 Combined score: {match_result['combined_score']:.2f} ({decision['confidence']} confidence) → {decision['action']}")
 
-            # Step 6: Execute action (aligned with batch processing behavior)
+            # Step 5: Execute action
+            embedding = []  # No embedding generated for streaming records
+
             if decision['action'] in ['AUTO_MERGE', 'HUMAN_REVIEW'] and match_result['best_match']:
-                # For demo: treating HUMAN_REVIEW same as AUTO_MERGE (matches batch behavior)
-                # In production, HUMAN_REVIEW would go to a review queue for manual decision
+                # Merge with existing entity
                 entity_id = self.update_golden_record(
                     match_result['best_match'], standardized, embedding)
-                action_detail = f"merged with existing {match_result['best_match']}"
+                action_detail = f"merged with existing {match_result['best_match'][:8]}..."
             else:
+                # Create new entity
                 entity_id = self.create_new_golden_record(
                     standardized, embedding)
                 action_detail = "new record created"
@@ -539,7 +445,7 @@ class StreamingMDMProcessor:
                 f"  🗃️ → {decision['action']} Spanner (entity_id: {entity_id[:8]}..., {action_detail})")
             print(f"  ⏱️ Processing time: {processing_time:.0f}ms")
 
-            # Build result dictionary
+            # Build result
             result = {
                 'record_id': record.get('record_id', str(uuid.uuid4())),
                 'record_num': record_num,
@@ -578,7 +484,8 @@ class StreamingMDMProcessor:
                 'processing_time_ms': processing_time,
                 'entity_id': None,
                 'strategy_scores': {},
-                'matched_entity': None
+                'matched_entity': None,
+                'gatekeeper_skip': False
             }
 
             # Add match details if requested (with zeros)
@@ -732,6 +639,26 @@ class StreamingMDMProcessor:
                 )
 
         self.spanner_helper.database.run_in_transaction(upsert_record)
+
+        # Stage new entity for future batch processing (golden master sync)
+        try:
+            golden_record_data = {
+                'entity_id': entity_id,
+                'master_name': record.get('full_name_clean'),
+                'master_email': record.get('email_clean'),
+                'master_phone': record.get('phone_clean'),
+                'master_address': record.get('address_clean'),
+                'master_city': record.get('city_clean'),
+                'master_state': record.get('state_clean'),
+                'master_company': record.get('company'),
+                'source_system': record.get('source_system', 'streaming'),
+                'processing_path': 'stream'
+            }
+            self.spanner_helper.stage_new_entity(
+                entity_id, golden_record_data, record.get('source_system', 'streaming'))
+        except Exception as e:
+            print(f"  ⚠️ Failed to stage entity for batch processing: {e}")
+
         return entity_id
 
     def update_golden_record(self, entity_id: str, record: Dict[str, Any], embedding: List[float]) -> str:
@@ -837,9 +764,9 @@ class StreamingMDMProcessor:
                 params={
                     'match_id': match_id,
                     'record1_id': result.get('record_id'),
-                    'record2_id': result.get('matched_entity', ''),
+                    'record2_id': result.get('matched_entity') or 'none',
                     'source1': record.get('source_system', 'unknown'),
-                    'source2': 'golden_entity',
+                    'source2': 'golden_entity' if result.get('matched_entity') else 'none',
                     'exact_score': float(result.get('strategy_scores', {}).get('exact', 0.0)),
                     'fuzzy_score': float(result.get('strategy_scores', {}).get('fuzzy', 0.0)),
                     'vector_score': float(result.get('strategy_scores', {}).get('vector', 0.0)),
@@ -868,3 +795,72 @@ class StreamingMDMProcessor:
 
         self.spanner_helper.database.run_in_transaction(insert_match)
         return match_id
+
+    @staticmethod
+    def add_realistic_variations(existing_df):
+        """Add realistic variations to existing records to simulate data drift."""
+        import random
+        import re
+
+        varied_records = []
+
+        for _, row in existing_df.iterrows():
+            # Create variations of the existing record
+            base_record = {
+                # 32 chars max
+                'record_id': str(uuid.uuid4()).replace('-', '')[:32],
+                'full_name': row['full_name'],
+                'email': row['email'],
+                'phone': row['phone'],
+                'address': row.get('address', ''),
+                'city': row.get('city', ''),
+                'state': row.get('state', ''),
+                'company': row.get('company', ''),
+                'source_system': 'streaming_variation'
+            }
+
+            # Apply realistic variations (simulate data drift)
+            variation_type = random.choice(
+                ['email', 'phone', 'name', 'address'])
+
+            if variation_type == 'email' and base_record['email']:
+                # Change email domain: john@gmail.com -> john@outlook.com
+                email_parts = base_record['email'].split('@')
+                if len(email_parts) == 2:
+                    new_domains = ['outlook.com', 'yahoo.com',
+                                   'hotmail.com', 'icloud.com']
+                    base_record['email'] = f"{email_parts[0]}@{random.choice(new_domains)}"
+
+            elif variation_type == 'phone' and base_record['phone']:
+                # Change phone formatting: 555-1234 -> (555) 123-4567
+                phone = re.sub(r'[^0-9]', '', base_record['phone'])
+                if len(phone) >= 10:
+                    base_record['phone'] = f"({phone[:3]}) {phone[3:6]}-{phone[6:10]}"
+
+            elif variation_type == 'name' and base_record['full_name']:
+                # Name variations: John Smith -> J. Smith or John A. Smith
+                name_parts = base_record['full_name'].split()
+                if len(name_parts) >= 2:
+                    if random.choice([True, False]):
+                        # Abbreviate first name: John -> J.
+                        base_record['full_name'] = f"{name_parts[0][0]}. {' '.join(name_parts[1:])}"
+                    else:
+                        # Add middle initial: John Smith -> John A. Smith
+                        middle_initial = random.choice(
+                            'ABCDEFGHIJKLMNOPQRSTUVWXYZ')
+                        base_record[
+                            'full_name'] = f"{name_parts[0]} {middle_initial}. {' '.join(name_parts[1:])}"
+
+            elif variation_type == 'address' and base_record['address']:
+                # Address variations: 123 Main St -> 123 Main Street, Apt 2
+                address = base_record['address']
+                if 'St' in address and 'Street' not in address:
+                    address = address.replace(' St', ' Street')
+                if random.choice([True, False]):
+                    apt_num = random.randint(1, 20)
+                    address += f", Apt {apt_num}"
+                base_record['address'] = address
+
+            varied_records.append(base_record)
+
+        return varied_records

@@ -2,11 +2,14 @@
 
 ## Overview
 
-This document provides a comprehensive guide for implementing streaming Master Data Management (MDM) using Google Cloud Spanner, building upon the existing BigQuery batch processing implementation. It covers the **4-way matching engine** currently implemented for real-time streaming scenarios, with architecture for extending to 5-way matching.
+This document provides a comprehensive guide for implementing streaming Master Data Management (MDM) using Google Cloud Spanner, building upon the existing BigQuery batch processing implementation. It covers the **traditional 4-way matching engine** for real-time streaming scenarios.
 
 **Current Implementation Status:**
-- ✅ **4-Way Matching**: Exact, Fuzzy, Vector, Business Rules (Production Ready for <400ms latency)
-- 🔄 **5-Way Matching**: AI Natural Language (Available in batch processing, optional for streaming due to latency)
+- ✅ **4-Way Matching**: Exact, Fuzzy, Vector (existing embeddings only), Business Rules
+- ✅ **Traditional Approach**: All strategies run for every record for comprehensive matching
+- ✅ **Immediate Golden Records**: Created in Spanner for real-time use
+- ✅ **Staging for Enhancement**: All new entities staged for future batch processing
+- ✅ **Native COSINE_DISTANCE**: Proven idempotent vector search using existing embeddings
 
 **Relationship to Batch Processing:**
 - **Batch MDM**: Full 5-way matching with AI Natural Language for maximum accuracy
@@ -110,20 +113,13 @@ flowchart TB
             BIZ_Q["SQL Query with CASE<br/>SELECT entity_id<br/>CASE<br/>WHEN company Acme Corp<br/>AND location NYC THEN 0.9<br/>WHEN company Acme Corp THEN 0.7<br/>WHEN industry Tech THEN 0.5<br/>END as score"]
             BIZ_R["Result - Business matches<br/>entity_567 same company to 0.7<br/>entity_890 same industry to 0.5"]
         end
-
-        %% Strategy 5: AI Natural Language
-        subgraph AI["Strategy 5 - AI Natural Language"]
-            AI_CAND["Get top 5 candidates<br/>from other strategies"]
-            AI_CALL["For each candidate<br/>Call Gemini API<br/><br/>Prompt - Compare<br/>Entity 1 - John Smith Acme<br/>Entity 2 - J. Smith Acme<br/>Are they the same?"]
-            AI_R["Result - AI assessment<br/>entity_123 to 0.95 Same person<br/>entity_789 to 0.82 Likely same<br/>entity_456 to 0.3 Different"]
-        end
     end
 
     %% Score Combination
     subgraph Scoring["Score Combination"]
-        COMBINE["Weighted Average<br/>Exact - 30% weight<br/>Fuzzy - 25% weight<br/>Vector - 20% weight<br/>Business - 15% weight<br/>AI - 10% weight"]
+        COMBINE["Weighted Average<br/>Exact - 33% weight<br/>Fuzzy - 28% weight<br/>Vector - 22% weight<br/>Business - 17% weight<br/>(No AI for streaming)"]
 
-        FINAL["Final Scores<br/>entity_123 - 0.91 HIGH<br/>entity_789 - 0.76 MEDIUM<br/>entity_456 - 0.68 MEDIUM"]
+        FINAL["Final Scores<br/>entity_123 - 0.85 HIGH<br/>entity_789 - 0.72 MEDIUM<br/>entity_456 - 0.65 MEDIUM"]
 
         DECISION["Decision<br/>entity_123 Auto-merge<br/>entity_789 Human review<br/>entity_456 Human review"]
     end
@@ -151,17 +147,10 @@ flowchart TB
     VECTOR_Q --> VECTOR_R
     BIZ_Q --> BIZ_R
 
-    EXACT_R --> AI_CAND
-    FUZZY_R --> AI_CAND
-    VECTOR_R --> AI_CAND
-    AI_CAND --> AI_CALL
-    AI_CALL --> AI_R
-
     EXACT_R --> COMBINE
     FUZZY_R --> COMBINE
     VECTOR_R --> COMBINE
     BIZ_R --> COMBINE
-    AI_R --> COMBINE
 
     COMBINE --> FINAL
     FINAL --> DECISION
@@ -178,7 +167,7 @@ flowchart TB
     class MSG kafkaStyle
     class CONSUME,STANDARD,EMBED consumerStyle
     class STORE,ENTITIES,MATCHES,SAVE_MATCH,UPDATE spannerStyle
-    class EXACT_Q,EXACT_R,FUZZY_Q,FUZZY_R,VECTOR_Q,VECTOR_R,BIZ_Q,BIZ_R,AI_CAND,AI_CALL,AI_R matchStyle
+    class EXACT_Q,EXACT_R,FUZZY_Q,FUZZY_R,VECTOR_Q,VECTOR_R,BIZ_Q,BIZ_R matchStyle
     class COMBINE,FINAL,DECISION scoreStyle
 ```
 
@@ -188,12 +177,42 @@ flowchart TB
 
 ### Current Production Implementation
 
-The streaming MDM system currently implements **4-way matching** for optimal performance and cost efficiency:
+The streaming MDM system implements **traditional 4-way matching** for all records:
 
-1. **Exact Matching** - Email, phone, and ID lookups using indexes
-2. **Fuzzy Matching** - Name and address similarity using Levenshtein distance
-3. **Vector Matching** - Semantic similarity using Spanner's native vector search
-4. **Business Rules** - Domain-specific logic for company, location, and industry
+1. **Exact Matching** - Email, phone, and ID lookups using indexes (33% weight)
+2. **Fuzzy Matching** - Name and address similarity using Levenshtein distance (28% weight)
+3. **Vector Matching** - Semantic similarity using existing embeddings only (22% weight)
+4. **Business Rules** - Domain-specific logic for company, location, and industry (17% weight)
+
+### 🎯 **Traditional 4-Way Matching Approach**
+
+**Key Principle**: Run all 4 strategies for every streaming record to ensure comprehensive matching:
+
+#### **The Logic:**
+```
+For every streaming record:
+1. Run exact matching (email/phone indexes)
+2. Run fuzzy matching (name/address similarity)
+3. Run vector matching (existing embeddings only, skip if none)
+4. Run business rules (company/location logic)
+5. Combine weighted scores
+6. Make decision: AUTO_MERGE (≥0.8) or CREATE_NEW (<0.8)
+```
+
+#### **Why This Approach Works:**
+- ✅ **Consistent Performance**: Same logic path for all records (~185ms)
+- ✅ **Predictable Results**: No complex gatekeeper decisions
+- ✅ **Easy Debugging**: Clear scoring trail for every record
+- ✅ **Proven Strategy**: Traditional MDM approach with known characteristics
+
+### 🏗️ **Immediate + Future Processing Architecture**
+
+For every streaming record, the system:
+
+1. **Creates Golden Record** in Spanner immediately for real-time operational use
+2. **Stages New Entities** in `new_entities_staging` table for future batch enhancement
+3. **Batch Processing** later adds embeddings and enhanced matching
+4. **Best of Both Worlds**: Speed for operations + thoroughness for analytics
 
 The 5th strategy (AI Natural Language) is architecturally documented but not implemented in the current production system to maintain sub-second latency requirements.
 
@@ -279,9 +298,11 @@ All optimizations have been thoroughly tested:
 
 ---
 
-## 5-Way Matching Engine Architecture
+## Future Architecture: 5-Way Matching (Optional)
 
-### Detailed Implementation of Each Strategy
+### **⚠️ Note: This section shows the complete 5-way architecture for reference. Current streaming implementation uses 4-way matching only.**
+
+### Detailed Implementation of Each Strategy (Future/Optional)
 
 ```mermaid
 flowchart LR
@@ -921,10 +942,10 @@ gantt
 This streaming MDM implementation with Spanner provides:
 
 ✅ **Real-time Processing**: Sub-second latency for critical matches
-✅ **Complete 5-Way Matching**: All strategies from BigQuery batch implementation
+✅ **Traditional 4-Way Matching**: Exact, Fuzzy, Vector (existing embeddings), Business Rules
 ✅ **Schema Alignment**: Seamless integration with existing BigQuery data
 ✅ **Scalable Architecture**: Handles millions of entities with consistent performance
-✅ **Cost Optimization**: Intelligent AI usage to balance accuracy and cost
+✅ **Cost Optimization**: No AI overhead for sub-second performance
 
 ### Next Steps
 
