@@ -142,27 +142,6 @@ class SpannerMDMHelper:
         """Check if all required indexes exist"""
         return all(self.index_exists(index) for index in index_names)
 
-    def truncate_all_tables(self):
-        """Quickly truncate all MDM tables"""
-        try:
-            print("  🗑️ Truncating existing tables...")
-
-            # Clear tables in dependency order (match_results first, then golden_entities)
-            tables_to_clear = ["match_results", "golden_entities"]
-
-            for table_name in tables_to_clear:
-                if self.table_exists(table_name):
-                    self.clear_table(table_name)
-                    print(f"    ✅ Truncated: {table_name}")
-                else:
-                    print(f"    ⚠️ Table {table_name} doesn't exist, skipping")
-
-            print("  ✅ All tables truncated successfully")
-
-        except Exception as e:
-            print(f"  ❌ Error truncating tables: {e}")
-            raise
-
     def drop_table_if_exists(self, table_name: str):
         """Drop a table if it exists with proper verification"""
         try:
@@ -197,7 +176,7 @@ class SpannerMDMHelper:
     def create_or_replace_schema(self):
         """
         OPTIMIZED: Create or replace the MDM schema with smart checking.
-        If schema exists, just truncate data. If not, create from scratch.
+        Schema checking only - data operations handled separately.
         """
         try:
             print("  🔄 Checking schema status...")
@@ -214,9 +193,7 @@ class SpannerMDMHelper:
             indexes_exist = self.check_indexes_exist(required_indexes)
 
             if tables_exist and indexes_exist:
-                print("  ✅ Schema exists - truncating data only (fast path)")
-                self.truncate_all_tables()
-                print("  ✅ Schema ready")
+                print("  ✅ Schema exists and ready (fast path)")
             else:
                 print("  🔨 Schema missing - creating from scratch (slow path)")
                 self._create_full_schema()
@@ -430,41 +407,87 @@ class SpannerMDMHelper:
 
     def _build_golden_record_values(self, row):
         """Helper to build values list for golden record insertion"""
-        def to_array(value):
-            # Handle None/NaN
-            if pd.isna(value) or value is None:
-                return []
+        def to_array(value, field_name="unknown"):
+            """Convert value to array with robust error handling"""
+            try:
+                # Handle None first (before any pandas operations)
+                if value is None:
+                    return []
 
-            # Handle already converted lists
-            if isinstance(value, list):
-                return [str(item) if item is not None else None for item in value]
+                # Handle numpy arrays FIRST (before any pandas checks)
+                if hasattr(value, 'tolist'):  # NumPy arrays have tolist() method
+                    try:
+                        array_list = value.tolist()
+                        return [str(item) if item is not None else None for item in array_list]
+                    except Exception as e:
+                        print(
+                            f"  ⚠️ Warning: tolist() failed for {field_name}: {e}")
+                        return [str(value)]
 
-            # Handle numpy arrays and other iterables (but not strings)
-            if hasattr(value, '__iter__') and not isinstance(value, (str, int, float)):
+                # Handle pandas Series or DataFrame columns
+                if hasattr(value, 'values'):  # pandas Series
+                    try:
+                        array_list = value.values.tolist()
+                        return [str(item) if item is not None else None for item in array_list]
+                    except Exception as e:
+                        print(
+                            f"  ⚠️ Warning: pandas values conversion failed for {field_name}: {e}")
+                        return [str(value)]
+
+                # Safe pandas isna check for scalar values only
                 try:
-                    result = list(value)
-                    return [str(item) if item is not None else None for item in result]
-                except:
+                    # Only use pd.isna for scalar types to avoid array ambiguity
+                    if isinstance(value, (str, int, float, type(None))):
+                        if pd.isna(value):
+                            return []
+                except Exception:
+                    # If pd.isna fails, continue with other checks
+                    pass
+
+                # Handle already converted lists
+                if isinstance(value, list):
+                    return [str(item) if item is not None else None for item in value]
+
+                # Handle string representations of arrays like "[item1, item2]"
+                if isinstance(value, str):
+                    if value.startswith('[') and value.endswith(']'):
+                        try:
+                            import ast
+                            parsed = ast.literal_eval(value)
+                            return [str(item) for item in parsed] if isinstance(parsed, list) else [str(parsed)]
+                        except:
+                            return [value]
+                    else:
+                        # Regular string - wrap in list
+                        return [value]
+
+                # Handle other iterables (but not strings) - be very careful
+                if hasattr(value, '__iter__'):
+                    try:
+                        result = list(value)
+                        return [str(item) if item is not None else None for item in result]
+                    except Exception as e:
+                        print(
+                            f"  ⚠️ Warning: iteration failed for {field_name}: {e}")
+                        return [str(value)]
+
+                # Handle all other types - wrap in list
+                return [str(value)]
+
+            except Exception as e:
+                print(f"  ❌ Error processing {field_name}: {e}")
+                # Fallback: convert to string and wrap in list
+                try:
                     return [str(value)]
-
-            # Handle string representations of arrays like "[item1, item2]"
-            if isinstance(value, str) and value.startswith('[') and value.endswith(']'):
-                try:
-                    import ast
-                    parsed = ast.literal_eval(value)
-                    return [str(item) for item in parsed] if isinstance(parsed, list) else [str(parsed)]
                 except:
-                    return [value]
-
-            # Handle all other types - wrap in list
-            return [str(value)]
+                    return []
 
         return [
             row['master_id'],
-            to_array(row['source_record_ids']),
+            to_array(row['source_record_ids'], 'source_record_ids'),
             int(row['source_record_count']) if pd.notna(
                 row['source_record_count']) else 1,
-            to_array(row['source_systems']),
+            to_array(row['source_systems'], 'source_systems'),
             self._safe_value(row['master_name']),
             self._safe_value(row['master_email']),
             self._safe_value(row['master_phone']),

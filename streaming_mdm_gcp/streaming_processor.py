@@ -521,8 +521,10 @@ class StreamingMDMProcessor:
             print(
                 f"  📊 Combined score: {match_result['combined_score']:.2f} ({decision['confidence']} confidence) → {decision['action']}")
 
-            # Step 6: Execute action
-            if decision['action'] == 'AUTO_MERGE' and match_result['best_match']:
+            # Step 6: Execute action (aligned with batch processing behavior)
+            if decision['action'] in ['AUTO_MERGE', 'HUMAN_REVIEW'] and match_result['best_match']:
+                # For demo: treating HUMAN_REVIEW same as AUTO_MERGE (matches batch behavior)
+                # In production, HUMAN_REVIEW would go to a review queue for manual decision
                 entity_id = self.update_golden_record(
                     match_result['best_match'], standardized, embedding)
                 action_detail = f"merged with existing {match_result['best_match']}"
@@ -592,65 +594,144 @@ class StreamingMDMProcessor:
             return result
 
     def create_new_golden_record(self, record: Dict[str, Any], embedding: List[float]) -> str:
-        """Create a new golden record with deterministic ID"""
+        """Create a new golden record with deterministic ID (UPSERT logic)"""
         entity_id = self.generate_deterministic_entity_id(record)
 
-        def insert_record(transaction):
-            transaction.execute_update(
-                """
-                INSERT INTO golden_entities (
-                    entity_id, source_record_ids, source_record_count, source_systems,
-                    master_name, master_email, master_phone, master_address,
-                    master_city, master_state, master_company, master_income,
-                    master_segment, embedding, confidence_score, processing_path,
-                    created_at, updated_at
-                ) VALUES (
-                    @entity_id, @source_record_ids, @source_record_count, @source_systems,
-                    @master_name, @master_email, @master_phone, @master_address,
-                    @master_city, @master_state, @master_company, @master_income,
-                    @master_segment, @embedding, @confidence_score, @processing_path,
-                    PENDING_COMMIT_TIMESTAMP(), PENDING_COMMIT_TIMESTAMP()
-                )
-                """,
-                params={
-                    'entity_id': entity_id,
-                    'source_record_ids': [record.get('record_id', entity_id)],
-                    'source_record_count': 1,
-                    'source_systems': [record.get('source_system', 'unknown')],
-                    'master_name': record.get('full_name_clean'),
-                    'master_email': record.get('email_clean'),
-                    'master_phone': record.get('phone_clean'),
-                    'master_address': record.get('address_clean'),
-                    'master_city': record.get('city_clean'),
-                    'master_state': record.get('state_clean'),
-                    'master_company': record.get('company'),
-                    'master_income': record.get('annual_income'),
-                    'master_segment': record.get('customer_segment'),
-                    'embedding': embedding,
-                    'confidence_score': 0.8,  # New record confidence
-                    'processing_path': 'stream'
-                },
-                param_types={
-                    'entity_id': param_types.STRING,
-                    'source_record_ids': param_types.Array(param_types.STRING),
-                    'source_record_count': param_types.INT64,
-                    'source_systems': param_types.Array(param_types.STRING),
-                    'master_name': param_types.STRING,
-                    'master_email': param_types.STRING,
-                    'master_phone': param_types.STRING,
-                    'master_address': param_types.STRING,
-                    'master_city': param_types.STRING,
-                    'master_state': param_types.STRING,
-                    'master_company': param_types.STRING,
-                    'master_income': param_types.INT64,
-                    'master_segment': param_types.STRING,
-                    'embedding': param_types.Array(param_types.FLOAT64),
-                    'confidence_score': param_types.FLOAT64,
-                    'processing_path': param_types.STRING
-                }
+        def upsert_record(transaction):
+            # Check if entity already exists
+            check_query = """
+            SELECT entity_id, source_record_ids, source_systems, source_record_count
+            FROM golden_entities
+            WHERE entity_id = @entity_id
+            """
+
+            existing_result = transaction.execute_sql(
+                check_query,
+                params={'entity_id': entity_id},
+                param_types={'entity_id': param_types.STRING}
             )
 
-        self.spanner_helper.database.run_in_transaction(insert_record)
+            existing_rows = list(existing_result)
+
+            if existing_rows:
+                # Entity exists - update it (merge logic)
+                current_row = existing_rows[0]
+                current_source_ids = current_row[1] or []
+                current_sources = current_row[2] or []
+                current_count = current_row[3] or 0
+
+                # Add new source information
+                new_source_ids = current_source_ids + \
+                    [record.get('record_id', entity_id)]
+                new_sources = list(
+                    set(current_sources + [record.get('source_system', 'unknown')]))
+                new_count = current_count + 1
+
+                # Update existing record
+                transaction.execute_update(
+                    """
+                    UPDATE golden_entities
+                    SET source_record_ids = @source_record_ids,
+                        source_systems = @source_systems,
+                        source_record_count = @source_record_count,
+                        master_name = COALESCE(@master_name, master_name),
+                        master_email = COALESCE(@master_email, master_email),
+                        master_phone = COALESCE(@master_phone, master_phone),
+                        master_address = COALESCE(@master_address, master_address),
+                        master_city = COALESCE(@master_city, master_city),
+                        master_state = COALESCE(@master_state, master_state),
+                        master_company = COALESCE(@master_company, master_company),
+                        embedding = @embedding,
+                        processing_path = 'stream_updated',
+                        updated_at = PENDING_COMMIT_TIMESTAMP()
+                    WHERE entity_id = @entity_id
+                    """,
+                    params={
+                        'entity_id': entity_id,
+                        'source_record_ids': new_source_ids,
+                        'source_systems': new_sources,
+                        'source_record_count': new_count,
+                        'master_name': record.get('full_name_clean'),
+                        'master_email': record.get('email_clean'),
+                        'master_phone': record.get('phone_clean'),
+                        'master_address': record.get('address_clean'),
+                        'master_city': record.get('city_clean'),
+                        'master_state': record.get('state_clean'),
+                        'master_company': record.get('company'),
+                        'embedding': embedding
+                    },
+                    param_types={
+                        'entity_id': param_types.STRING,
+                        'source_record_ids': param_types.Array(param_types.STRING),
+                        'source_systems': param_types.Array(param_types.STRING),
+                        'source_record_count': param_types.INT64,
+                        'master_name': param_types.STRING,
+                        'master_email': param_types.STRING,
+                        'master_phone': param_types.STRING,
+                        'master_address': param_types.STRING,
+                        'master_city': param_types.STRING,
+                        'master_state': param_types.STRING,
+                        'master_company': param_types.STRING,
+                        'embedding': param_types.Array(param_types.FLOAT64)
+                    }
+                )
+            else:
+                # Entity doesn't exist - insert new record
+                transaction.execute_update(
+                    """
+                    INSERT INTO golden_entities (
+                        entity_id, source_record_ids, source_record_count, source_systems,
+                        master_name, master_email, master_phone, master_address,
+                        master_city, master_state, master_company, master_income,
+                        master_segment, embedding, confidence_score, processing_path,
+                        created_at, updated_at
+                    ) VALUES (
+                        @entity_id, @source_record_ids, @source_record_count, @source_systems,
+                        @master_name, @master_email, @master_phone, @master_address,
+                        @master_city, @master_state, @master_company, @master_income,
+                        @master_segment, @embedding, @confidence_score, @processing_path,
+                        PENDING_COMMIT_TIMESTAMP(), PENDING_COMMIT_TIMESTAMP()
+                    )
+                    """,
+                    params={
+                        'entity_id': entity_id,
+                        'source_record_ids': [record.get('record_id', entity_id)],
+                        'source_record_count': 1,
+                        'source_systems': [record.get('source_system', 'unknown')],
+                        'master_name': record.get('full_name_clean'),
+                        'master_email': record.get('email_clean'),
+                        'master_phone': record.get('phone_clean'),
+                        'master_address': record.get('address_clean'),
+                        'master_city': record.get('city_clean'),
+                        'master_state': record.get('state_clean'),
+                        'master_company': record.get('company'),
+                        'master_income': record.get('annual_income'),
+                        'master_segment': record.get('customer_segment'),
+                        'embedding': embedding,
+                        'confidence_score': 0.8,  # New record confidence
+                        'processing_path': 'stream'
+                    },
+                    param_types={
+                        'entity_id': param_types.STRING,
+                        'source_record_ids': param_types.Array(param_types.STRING),
+                        'source_record_count': param_types.INT64,
+                        'source_systems': param_types.Array(param_types.STRING),
+                        'master_name': param_types.STRING,
+                        'master_email': param_types.STRING,
+                        'master_phone': param_types.STRING,
+                        'master_address': param_types.STRING,
+                        'master_city': param_types.STRING,
+                        'master_state': param_types.STRING,
+                        'master_company': param_types.STRING,
+                        'master_income': param_types.INT64,
+                        'master_segment': param_types.STRING,
+                        'embedding': param_types.Array(param_types.FLOAT64),
+                        'confidence_score': param_types.FLOAT64,
+                        'processing_path': param_types.STRING
+                    }
+                )
+
+        self.spanner_helper.database.run_in_transaction(upsert_record)
         return entity_id
 
     def update_golden_record(self, entity_id: str, record: Dict[str, Any], embedding: List[float]) -> str:
@@ -759,11 +840,11 @@ class StreamingMDMProcessor:
                     'record2_id': result.get('matched_entity', ''),
                     'source1': record.get('source_system', 'unknown'),
                     'source2': 'golden_entity',
-                    'exact_score': result.get('strategy_scores', {}).get('exact', 0),
-                    'fuzzy_score': result.get('strategy_scores', {}).get('fuzzy', 0),
-                    'vector_score': result.get('strategy_scores', {}).get('vector', 0),
-                    'business_score': result.get('strategy_scores', {}).get('business', 0),
-                    'combined_score': result.get('combined_score', 0),
+                    'exact_score': float(result.get('strategy_scores', {}).get('exact', 0.0)),
+                    'fuzzy_score': float(result.get('strategy_scores', {}).get('fuzzy', 0.0)),
+                    'vector_score': float(result.get('strategy_scores', {}).get('vector', 0.0)),
+                    'business_score': float(result.get('strategy_scores', {}).get('business', 0.0)),
+                    'combined_score': float(result.get('combined_score', 0.0)),
                     'confidence_level': result.get('confidence', 'LOW'),
                     'match_decision': result.get('action', 'ERROR'),
                     'processing_time_ms': int(result.get('processing_time_ms', 0))
