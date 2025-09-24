@@ -389,67 +389,173 @@ class StreamingMDMProcessor:
                 'decision': 'create_new'
             }
 
-    def process_record(self, record: Dict[str, Any], record_num: int, total_records: int) -> Dict[str, Any]:
-        """Process a single streaming record with 4-way matching"""
+    def get_match_counts(self, standardized_record: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Get match counts for all strategies with cached processing.
+        This method caches the standardized record and embedding to avoid redundant processing.
+        """
+        try:
+            # Generate embedding once for vector matching
+            embedding = self.generate_embedding(standardized_record)
 
+            # Calculate matches for each strategy
+            exact_matches = self.find_exact_matches(standardized_record)
+            fuzzy_matches = self.find_fuzzy_matches(standardized_record)
+            vector_matches = self.find_vector_matches(
+                standardized_record, embedding)
+            business_matches = self.apply_business_rules(standardized_record)
+
+            return {
+                'exact_count': len(exact_matches),
+                'fuzzy_count': len(fuzzy_matches),
+                'vector_count': len(vector_matches),
+                'business_count': len(business_matches),
+                'exact_matches': exact_matches,
+                'fuzzy_matches': fuzzy_matches,
+                'vector_matches': vector_matches,
+                'business_matches': business_matches,
+                'embedding': embedding,
+                'standardized_record': standardized_record
+            }
+        except Exception as e:
+            print(f"  ⚠️ Error calculating match counts: {e}")
+            return {
+                'exact_count': 0,
+                'fuzzy_count': 0,
+                'vector_count': 0,
+                'business_count': 0,
+                'exact_matches': [],
+                'fuzzy_matches': [],
+                'vector_matches': [],
+                'business_matches': [],
+                'embedding': [],
+                'standardized_record': standardized_record
+            }
+
+    def process_record(self, record: Dict[str, Any], record_num: int, total_records: int, include_match_details: bool = False) -> Dict[str, Any]:
+        """
+        Process a single streaming record with 4-way matching.
+
+        Args:
+            record: The input record to process
+            record_num: Current record number for display
+            total_records: Total number of records for display
+            include_match_details: If True, include detailed match counts in result
+
+        Returns:
+            Dictionary with processing results including match details if requested
+        """
         start_time = time.time()
 
         print(f"📨 Record {record_num}/{total_records}: {record.get('full_name', 'Unknown')} ({record.get('email', 'No email')}) - {record.get('source_system', 'Unknown')} Source")
 
-        # Step 1: Standardize
-        standardized = self.standardize_record(record)
+        try:
+            # Step 1: Standardize record once and cache it
+            standardized = self.standardize_record(record)
 
-        # Step 2: Generate embedding
-        embedding = self.generate_embedding(standardized)
+            # Step 2: Get cached match details if requested
+            if include_match_details:
+                match_details = self.get_match_counts(standardized)
+                exact_matches = match_details['exact_matches']
+                fuzzy_matches = match_details['fuzzy_matches']
+                vector_matches = match_details['vector_matches']
+                business_matches = match_details['business_matches']
+                embedding = match_details['embedding']
+            else:
+                # Step 2: Generate embedding
+                embedding = self.generate_embedding(standardized)
 
-        # Step 3: Run 4-way matching
-        exact_matches = self.find_exact_matches(standardized)
-        print(f"  ⚡ Exact matching: {len(exact_matches)} matches found")
+                # Step 3: Run 4-way matching
+                exact_matches = self.find_exact_matches(standardized)
+                fuzzy_matches = self.find_fuzzy_matches(standardized)
+                vector_matches = self.find_vector_matches(
+                    standardized, embedding)
+                business_matches = self.apply_business_rules(standardized)
 
-        fuzzy_matches = self.find_fuzzy_matches(standardized)
-        print(f"  🔍 Fuzzy matching: {len(fuzzy_matches)} matches found")
+            print(f"  ⚡ Exact matching: {len(exact_matches)} matches found")
+            print(f"  🔍 Fuzzy matching: {len(fuzzy_matches)} matches found")
+            print(f"  🧮 Vector matching: {len(vector_matches)} matches found")
+            print(f"  📋 Business rules: {len(business_matches)} matches found")
 
-        vector_matches = self.find_vector_matches(standardized, embedding)
-        print(f"  🧮 Vector matching: {len(vector_matches)} matches found")
+            # Step 4: Combine scores
+            match_result = self.combine_scores(
+                exact_matches, fuzzy_matches, vector_matches, business_matches)
 
-        business_matches = self.apply_business_rules(standardized)
-        print(f"  📋 Business rules: {len(business_matches)} matches found")
+            # Step 5: Make decision
+            decision = self.make_decision(match_result['combined_score'])
 
-        # Step 4: Combine scores
-        match_result = self.combine_scores(
-            exact_matches, fuzzy_matches, vector_matches, business_matches)
+            print(
+                f"  📊 Combined score: {match_result['combined_score']:.2f} ({decision['confidence']} confidence) → {decision['action']}")
 
-        # Step 5: Make decision
-        decision = self.make_decision(match_result['combined_score'])
+            # Step 6: Execute action
+            if decision['action'] == 'AUTO_MERGE' and match_result['best_match']:
+                entity_id = self.update_golden_record(
+                    match_result['best_match'], standardized, embedding)
+                action_detail = f"merged with existing {match_result['best_match']}"
+            else:
+                entity_id = self.create_new_golden_record(
+                    standardized, embedding)
+                action_detail = "new record created"
 
-        print(
-            f"  📊 Combined score: {match_result['combined_score']:.2f} ({decision['confidence']} confidence) → {decision['action']}")
+            processing_time = (time.time() - start_time) * 1000
 
-        # Step 6: Execute action
-        if decision['action'] == 'AUTO_MERGE' and match_result['best_match']:
-            entity_id = self.update_golden_record(
-                match_result['best_match'], standardized, embedding)
-            action_detail = f"merged with existing {match_result['best_match']}"
-        else:
-            entity_id = self.create_new_golden_record(standardized, embedding)
-            action_detail = "new record created"
+            print(
+                f"  🗃️ → {decision['action']} Spanner (entity_id: {entity_id[:8]}..., {action_detail})")
+            print(f"  ⏱️ Processing time: {processing_time:.0f}ms")
 
-        processing_time = (time.time() - start_time) * 1000
+            # Build result dictionary
+            result = {
+                'record_id': record.get('record_id', str(uuid.uuid4())),
+                'record_num': record_num,
+                'entity_id': entity_id,
+                'action': decision['action'],
+                'confidence': decision['confidence'],
+                'combined_score': match_result['combined_score'],
+                'strategy_scores': match_result['strategy_scores'],
+                'processing_time_ms': processing_time,
+                'matched_entity': match_result['best_match']
+            }
 
-        print(
-            f"  🗃️ → {decision['action']} Spanner (entity_id: {entity_id[:8]}..., {action_detail})")
-        print(f"  ⏱️ Processing time: {processing_time:.0f}ms")
+            # Add match details if requested
+            if include_match_details:
+                result.update({
+                    'exact_count': len(exact_matches),
+                    'fuzzy_count': len(fuzzy_matches),
+                    'vector_count': len(vector_matches),
+                    'business_count': len(business_matches),
+                    'standardized_record': standardized
+                })
 
-        return {
-            'record_id': record.get('record_id', str(uuid.uuid4())),
-            'entity_id': entity_id,
-            'action': decision['action'],
-            'confidence': decision['confidence'],
-            'combined_score': match_result['combined_score'],
-            'strategy_scores': match_result['strategy_scores'],
-            'processing_time_ms': processing_time,
-            'matched_entity': match_result['best_match']
-        }
+            return result
+
+        except Exception as e:
+            processing_time = (time.time() - start_time) * 1000
+            print(f"  ❌ Error processing record {record_num}: {e}")
+
+            # Return error result
+            result = {
+                'record_id': record.get('record_id', 'unknown'),
+                'record_num': record_num,
+                'action': 'ERROR',
+                'confidence': 'LOW',
+                'combined_score': 0.0,
+                'processing_time_ms': processing_time,
+                'entity_id': None,
+                'strategy_scores': {},
+                'matched_entity': None
+            }
+
+            # Add match details if requested (with zeros)
+            if include_match_details:
+                result.update({
+                    'exact_count': 0,
+                    'fuzzy_count': 0,
+                    'vector_count': 0,
+                    'business_count': 0,
+                    'standardized_record': {}
+                })
+
+            return result
 
     def create_new_golden_record(self, record: Dict[str, Any], embedding: List[float]) -> str:
         """Create a new golden record"""

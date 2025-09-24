@@ -11,6 +11,14 @@ from google.cloud.spanner_admin_instance_v1 import InstanceAdminClient
 from google.cloud.spanner_admin_instance_v1.types import Instance
 import pandas as pd
 
+# Constants
+DEFAULT_PROCESSING_UNITS = 100
+INSTANCE_CREATE_TIMEOUT = 300  # 5 minutes
+DATABASE_CREATE_TIMEOUT = 120  # 2 minutes
+DDL_OPERATION_TIMEOUT = 60     # 1 minute
+INDEX_CREATE_TIMEOUT = 60      # 1 minute
+INDEX_DROP_TIMEOUT = 30        # 30 seconds
+
 
 class SpannerMDMHelper:
     """Helper class for Spanner MDM operations"""
@@ -25,10 +33,9 @@ class SpannerMDMHelper:
         self.instance = self.client.instance(instance_id)
         self.database = self.instance.database(database_id)
 
-        logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger(__name__)
 
-    def create_instance_if_needed(self, processing_units: int = 100):
+    def create_instance_if_needed(self, processing_units: int = DEFAULT_PROCESSING_UNITS):
         """Create Spanner instance if it doesn't exist"""
         try:
             # Check if instance exists
@@ -59,7 +66,7 @@ class SpannerMDMHelper:
             )
 
             print(f"  ⏳ Waiting for instance creation...")
-            operation.result(timeout=300)  # 5 minutes timeout
+            operation.result(timeout=INSTANCE_CREATE_TIMEOUT)
             print(f"  ✅ Instance {self.instance_id} created successfully")
 
         except Exception as e:
@@ -77,7 +84,7 @@ class SpannerMDMHelper:
             # Create database
             print(f"  🔄 Creating database: {self.database_id}")
             operation = self.database.create()
-            operation.result(timeout=120)  # 2 minutes timeout
+            operation.result(timeout=DATABASE_CREATE_TIMEOUT)
             print(f"  ✅ Database {self.database_id} created successfully")
 
         except Exception as e:
@@ -92,6 +99,7 @@ class SpannerMDMHelper:
             FROM information_schema.tables
             WHERE table_schema = ''
             AND table_name = @table_name
+            LIMIT 1
             """
             with self.database.snapshot() as snapshot:
                 results = snapshot.execute_sql(
@@ -100,8 +108,60 @@ class SpannerMDMHelper:
                     param_types={'table_name': spanner.param_types.STRING}
                 )
                 return len(list(results)) > 0
-        except:
+        except Exception as e:
+            self.logger.warning(
+                f"Could not check if table {table_name} exists: {e}")
             return False
+
+    def index_exists(self, index_name: str) -> bool:
+        """Check if an index exists in the database"""
+        try:
+            query = """
+            SELECT index_name
+            FROM information_schema.indexes
+            WHERE index_name = @index_name
+            LIMIT 1
+            """
+            with self.database.snapshot() as snapshot:
+                results = snapshot.execute_sql(
+                    query,
+                    params={'index_name': index_name},
+                    param_types={'index_name': spanner.param_types.STRING}
+                )
+                return len(list(results)) > 0
+        except Exception as e:
+            self.logger.warning(
+                f"Could not check if index {index_name} exists: {e}")
+            return False
+
+    def check_tables_exist(self, table_names: list) -> bool:
+        """Check if all required tables exist"""
+        return all(self.table_exists(table) for table in table_names)
+
+    def check_indexes_exist(self, index_names: list) -> bool:
+        """Check if all required indexes exist"""
+        return all(self.index_exists(index) for index in index_names)
+
+    def truncate_all_tables(self):
+        """Quickly truncate all MDM tables"""
+        try:
+            print("  🗑️ Truncating existing tables...")
+
+            # Clear tables in dependency order (match_results first, then golden_entities)
+            tables_to_clear = ["match_results", "golden_entities"]
+
+            for table_name in tables_to_clear:
+                if self.table_exists(table_name):
+                    self.clear_table(table_name)
+                    print(f"    ✅ Truncated: {table_name}")
+                else:
+                    print(f"    ⚠️ Table {table_name} doesn't exist, skipping")
+
+            print("  ✅ All tables truncated successfully")
+
+        except Exception as e:
+            print(f"  ❌ Error truncating tables: {e}")
+            raise
 
     def drop_table_if_exists(self, table_name: str):
         """Drop a table if it exists with proper verification"""
@@ -135,7 +195,40 @@ class SpannerMDMHelper:
             raise
 
     def create_or_replace_schema(self):
-        """Create or replace the MDM schema - aligned with BigQuery structure"""
+        """
+        OPTIMIZED: Create or replace the MDM schema with smart checking.
+        If schema exists, just truncate data. If not, create from scratch.
+        """
+        try:
+            print("  🔄 Checking schema status...")
+
+            # Define required tables and indexes
+            required_tables = ["golden_entities", "match_results"]
+            required_indexes = [
+                "idx_master_email", "idx_master_phone",
+                "idx_master_name", "idx_master_company"
+            ]
+
+            # Check if schema already exists
+            tables_exist = self.check_tables_exist(required_tables)
+            indexes_exist = self.check_indexes_exist(required_indexes)
+
+            if tables_exist and indexes_exist:
+                print("  ✅ Schema exists - truncating data only (fast path)")
+                self.truncate_all_tables()
+                print("  ✅ Schema ready")
+            else:
+                print("  🔨 Schema missing - creating from scratch (slow path)")
+                self._create_full_schema()
+                print("  ✅ Schema created successfully")
+
+        except Exception as e:
+            print(f"  ❌ Error with optimized schema setup: {e}")
+            print("  🔄 Falling back to full schema creation...")
+            self._create_full_schema()
+
+    def _create_full_schema(self):
+        """Create the complete MDM schema from scratch (original logic)"""
         try:
             print("  🔄 Creating/updating schema...")
 
@@ -308,77 +401,7 @@ class SpannerMDMHelper:
             count = 0
             with self.database.batch() as batch:
                 for _, row in golden_df.iterrows():
-                    # Helper function to convert BigQuery arrays to Spanner arrays
-                    def to_array(value):
-                        # Handle None/NaN
-                        if pd.isna(value) or value is None:
-                            return []
-
-                        # Handle already converted lists
-                        if isinstance(value, list):
-                            return [str(item) if item is not None else None for item in value]
-
-                        # Handle numpy arrays and other iterables (but not strings)
-                        if hasattr(value, '__iter__') and not isinstance(value, (str, int, float)):
-                            try:
-                                result = list(value)
-                                return [str(item) if item is not None else None for item in result]
-                            except:
-                                # If conversion fails, treat as single value
-                                return [str(value)]
-
-                        # Handle string representations of arrays
-                        if isinstance(value, str):
-                            if value.startswith('[') and value.endswith(']'):
-                                try:
-                                    import ast
-                                    parsed = ast.literal_eval(value)
-                                    if isinstance(parsed, list):
-                                        return [str(item) for item in parsed]
-                                    else:
-                                        return [str(parsed)]
-                                except:
-                                    return [value]
-                            return [value]
-
-                        # Handle all other types (int, float, etc.) - wrap in list
-                        return [str(value)]
-
-                    # Debug: Print the values to see what's causing the issue
-                    values_list = [
-                        row['master_id'],
-                        to_array(row['source_record_ids']),
-                        int(row['source_record_count']) if pd.notna(
-                            row['source_record_count']) else 1,
-                        to_array(row['source_systems']),
-                        row['master_name'] if pd.notna(
-                            row['master_name']) else None,
-                        row['master_email'] if pd.notna(
-                            row['master_email']) else None,
-                        row['master_phone'] if pd.notna(
-                            row['master_phone']) else None,
-                        row['master_address'] if pd.notna(
-                            row['master_address']) else None,
-                        row['master_city'] if pd.notna(
-                            row['master_city']) else None,
-                        row['master_state'] if pd.notna(
-                            row['master_state']) else None,
-                        row['master_company'] if pd.notna(
-                            row['master_company']) else None,
-                        int(row['master_income']) if pd.notna(
-                            row['master_income']) else None,
-                        row['master_segment'] if pd.notna(
-                            row['master_segment']) else None,
-                        row['first_seen'] if pd.notna(
-                            row['first_seen']) else None,
-                        row['last_activity'] if pd.notna(
-                            row['last_activity']) else None,
-                        0.95,  # High confidence for migrated records
-                        'batch_migrated',
-                        row['created_at'] if pd.notna(
-                            row['created_at']) else spanner.COMMIT_TIMESTAMP,
-                        spanner.COMMIT_TIMESTAMP
-                    ]
+                    values_list = self._build_golden_record_values(row)
 
                     batch.insert(
                         table="golden_entities",
@@ -390,7 +413,6 @@ class SpannerMDMHelper:
                             "master_segment", "first_seen", "last_activity",
                             "confidence_score", "processing_path", "created_at", "updated_at"
                         ],
-                        # Wrap in list - each row should be a list
                         values=[values_list]
                     )
                     count += 1
@@ -402,11 +424,71 @@ class SpannerMDMHelper:
             print(f"  ❌ Error loading golden records: {e}")
             raise
 
+    def _safe_value(self, value, default=None):
+        """Helper to safely handle null/NaN values"""
+        return value if pd.notna(value) else default
+
+    def _build_golden_record_values(self, row):
+        """Helper to build values list for golden record insertion"""
+        def to_array(value):
+            # Handle None/NaN
+            if pd.isna(value) or value is None:
+                return []
+
+            # Handle already converted lists
+            if isinstance(value, list):
+                return [str(item) if item is not None else None for item in value]
+
+            # Handle numpy arrays and other iterables (but not strings)
+            if hasattr(value, '__iter__') and not isinstance(value, (str, int, float)):
+                try:
+                    result = list(value)
+                    return [str(item) if item is not None else None for item in result]
+                except:
+                    return [str(value)]
+
+            # Handle string representations of arrays like "[item1, item2]"
+            if isinstance(value, str) and value.startswith('[') and value.endswith(']'):
+                try:
+                    import ast
+                    parsed = ast.literal_eval(value)
+                    return [str(item) for item in parsed] if isinstance(parsed, list) else [str(parsed)]
+                except:
+                    return [value]
+
+            # Handle all other types - wrap in list
+            return [str(value)]
+
+        return [
+            row['master_id'],
+            to_array(row['source_record_ids']),
+            int(row['source_record_count']) if pd.notna(
+                row['source_record_count']) else 1,
+            to_array(row['source_systems']),
+            self._safe_value(row['master_name']),
+            self._safe_value(row['master_email']),
+            self._safe_value(row['master_phone']),
+            self._safe_value(row['master_address']),
+            self._safe_value(row['master_city']),
+            self._safe_value(row['master_state']),
+            self._safe_value(row['master_company']),
+            int(row['master_income']) if pd.notna(
+                row['master_income']) else None,
+            self._safe_value(row['master_segment']),
+            self._safe_value(row['first_seen']),
+            self._safe_value(row['last_activity']),
+            0.95,  # High confidence for migrated records
+            'batch_migrated',
+            self._safe_value(row['created_at'], spanner.COMMIT_TIMESTAMP),
+            spanner.COMMIT_TIMESTAMP
+        ]
+
     def get_table_count(self, table_name: str) -> int:
         """Get count of records in a table"""
         try:
             query = f"SELECT COUNT(*) as count FROM {table_name}"
             result = self.execute_sql(query)
             return int(result.iloc[0]['col_0']) if not result.empty else 0
-        except:
+        except Exception as e:
+            self.logger.warning(f"Could not get count for {table_name}: {e}")
             return 0

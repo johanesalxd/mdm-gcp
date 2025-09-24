@@ -8,7 +8,7 @@ This notebook implements the **Batch Processing Path** from the unified MDM arch
 
 - **100% BigQuery-Native Implementation**: All processing happens in BigQuery for maximum scalability
 - **Latest AI Models**: Uses `gemini-embedding-001` for state-of-the-art embeddings
-- **Multi-Strategy Matching**: Combines exact, fuzzy, vector, and business rules matching
+- **5-Strategy AI-Powered Matching**: Combines exact, fuzzy, vector, business rules, and AI natural language matching (uses `gemini-2.5-pro`)
 - **Automated Decision Making**: Confidence-based workflows with auto-merge and human review
 - **Production-Ready Patterns**: Scalable SQL patterns suitable for enterprise deployment
 
@@ -100,6 +100,13 @@ The notebook walks through each step of the MDM pipeline:
 - **Fuzzy Matching**: String similarity (edit distance, soundex, tokens)
 - **Vector Matching**: Semantic similarity using embeddings
 - **Business Rules**: Domain-specific logic (company, location, age)
+- **AI Natural Language**: Direct AI comparison using Gemini 2.5 Pro
+
+### 7.5. **AI Model Setup**
+- Create Gemini 2.5 Pro model for natural language matching
+- Configure BigQuery ML remote model with Vertex AI connection
+- Implement AI-powered entity comparison with explanations
+- Optimize API calls with LIMIT 500 for cost control
 
 ### 8. **Combined Scoring**
 - Weighted combination of all matching strategies
@@ -125,10 +132,11 @@ Adjust the importance of each matching strategy:
 
 ```python
 weights = {
-    'exact': 0.4,      # Exact field matches (highest priority)
-    'fuzzy': 0.3,      # String similarity
-    'vector': 0.2,     # Semantic similarity
-    'business': 0.1    # Domain-specific rules
+    'exact': 0.30,     # Exact field matches (highest priority)
+    'fuzzy': 0.25,     # String similarity
+    'vector': 0.20,    # Semantic similarity
+    'business': 0.15,  # Domain-specific rules
+    'ai': 0.10         # AI natural language reasoning
 }
 ```
 
@@ -208,10 +216,11 @@ After running the complete notebook, you should see:
 - **~120 golden records** created (57.7% deduplication rate)
 
 ### Matching Effectiveness
-- **Exact matches**: 85 matches (Email, Phone, ID)
-- **Fuzzy matches**: 72 matches (Name similarity, Address)
-- **Vector matches**: 45 matches (Semantic similarity)
-- **Business rules**: 38 matches (Company, Location, Demographics)
+- **Exact matches**: 86 matches (Email: 17, Phone: 69, ID: 0)
+- **Fuzzy matches**: 73 matches (Name: 0.752, Address: 0.700 avg scores)
+- **Vector matches**: 42 matches (Avg similarity: 0.740)
+- **Business rules**: 76 matches (Location: 76, Company/Age/Income: 0)
+- **AI Natural Language**: 22 matches (Avg score: 0.677, Confidence: 0.816)
 
 ### Performance Metrics
 - **Data completeness**: 100% across key fields (email, phone, address)
@@ -326,10 +335,20 @@ Error: Query exceeded resource limits
 
 ## 🔗 Related Resources
 
+### **Streaming Processing Documentation**
+- **[MDM Streaming Processing Guide](../streaming_mdm_gcp/MDM_STREAMING_PROCESSING.md)** - Real-time 4-way matching with Spanner
+- **[Streaming Processing Notebook](../streaming_mdm_gcp/streaming_mdm_processing.ipynb)** - Interactive streaming implementation
+- **[Streaming MDM Utilities](../streaming_mdm_gcp/spanner_utils.py)** - Optimized Spanner helper functions
+
+### **Batch Processing Resources**
 - **Demo Results & Visualizations**: [`MDM_BATCH_RESULTS.md`](./MDM_BATCH_RESULTS.md) - Comprehensive results analysis with Mermaid diagrams and demo scripts
-- **Main Project README**: `../README.md` - Overall MDM architecture
-- **Architecture Diagrams**: `../images/` - Visual architecture references
+- **[Batch Processing Notebook](./mdm_batch_processing.ipynb)** - Interactive 5-way matching implementation
 - **Source Code**: `batch_mdm_gcp/` - Reusable utility modules
+
+### **Architecture & Design**
+- **Main Project README**: `../README.md` - Overall MDM architecture and unified approach
+- **Architecture Diagrams**: `../images/` - Visual architecture references
+- **[Unified Implementation Guide](../mdm_unified_implementation.md)** - Cross-platform strategy
 
 ### External Documentation
 
@@ -337,27 +356,6 @@ Error: Query exceeded resource limits
 - [Vertex AI Embeddings](https://cloud.google.com/vertex-ai/docs/generative-ai/embeddings/get-text-embeddings)
 - [BigQuery Vector Search](https://cloud.google.com/bigquery/docs/vector-search-intro)
 - [BigQuery Data Quality](https://cloud.google.com/bigquery/docs/data-quality-overview)
-
-## 💡 Next Steps
-
-After completing this notebook, consider:
-
-1. **Review Results**: Check [`MDM_BATCH_RESULTS.md`](./MDM_BATCH_RESULTS.md) for detailed analysis and demo materials
-2. **Extend to Real Data**: Replace sample data with your actual source systems
-3. **Add More Sources**: Integrate additional data sources beyond CRM/ERP/E-commerce
-4. **Implement Streaming**: Add real-time processing using the streaming architecture path
-5. **Build UI**: Create data stewardship interfaces for human review workflows
-6. **Add Monitoring**: Implement comprehensive data quality and pipeline monitoring
-
-## 🤝 Contributing
-
-To contribute improvements to this notebook:
-
-1. Test changes with the sample data
-2. Ensure all cells run successfully
-3. Update documentation for any new features
-4. Consider backward compatibility with existing configurations
-
 ---
 
 **Happy Data Mastering! 🎯**
