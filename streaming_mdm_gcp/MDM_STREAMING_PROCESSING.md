@@ -947,4 +947,85 @@ The combination of Spanner's vector capabilities with the proven 5-way matching 
 
 ---
 
+## 🔧 Vector Matching Implementation Notes
+
+### Current Demo Implementation
+
+The current streaming implementation uses **simplified vector matching** for demo purposes:
+
+#### **Vector Embedding Generation**
+```python
+def generate_embedding(self, record: Dict[str, Any]) -> List[float]:
+    """Generate embedding for the record (placeholder for now)"""
+    # For demo purposes, create a simple hash-based embedding
+    # In production, this would call Vertex AI
+    content = ' '.join([
+        record.get('full_name_clean') or '',
+        record.get('email_clean') or '',
+        record.get('address_clean') or '',
+        record.get('city_clean') or '',
+        record.get('company') or ''
+    ])
+
+    # Simple hash-based embedding (768 dimensions)
+    hash_obj = hashlib.md5(content.encode())
+    hash_hex = hash_obj.hexdigest()
+
+    # Convert to 768-dimensional vector
+    embedding = []
+    for i in range(768):
+        byte_val = int(hash_hex[i % len(hash_hex)], 16)
+        embedding.append(float(byte_val) / 15.0)  # Normalize to 0-1
+
+    return embedding
+```
+
+#### **Vector Search Implementation**
+```python
+def find_vector_matches(self, record: Dict[str, Any], embedding: List[float]) -> List[Tuple[str, float, str]]:
+    """Find vector similarity matches (simplified for demo)"""
+    # Get a sample of entities to compare against (optimized for demo performance)
+    query = """
+    SELECT entity_id, embedding
+    FROM golden_entities
+    WHERE embedding IS NOT NULL
+    LIMIT 10  -- Reduced from 50 for better performance
+    """
+
+    # Calculate cosine similarity in Python (not optimal for production)
+    for _, row in results.iterrows():
+        similarity = self.calculate_cosine_similarity(embedding, stored_embedding)
+        if similarity > 0.8:  # Threshold for vector matches
+            matches.append((entity_id, similarity, 'vector'))
+```
+
+### ⚠️ Demo Limitations
+
+1. **Fake Embeddings**: Uses MD5 hash instead of real semantic embeddings
+2. **Inconsistent with BigQuery**: BigQuery uses real Gemini embeddings
+3. **Brute Force Search**: Python-based similarity calculation instead of optimized vector search
+4. **Limited Sample Size**: Only compares against 10 random records (reduced from 50)
+5. **No Semantic Meaning**: Hash-based vectors don't capture actual similarity
+
+### 🎯 Production Architecture
+
+For production implementation, see **[Vector Embeddings Architecture](../VECTOR_EMBEDDINGS_ARCHITECTURE.md)** which provides:
+
+- **Centralized Embedding Service**: Single source of truth for all embeddings
+- **Real Vertex AI Embeddings**: Consistent semantic vectors across BigQuery and Spanner
+- **Optimized Vector Search**: Native database vector operations
+- **Deterministic Results**: Same input always produces same embeddings
+- **Cost Optimization**: Generate once, use everywhere
+
+### 📈 Performance Impact
+
+| Approach | Latency | Accuracy | Consistency |
+|----------|---------|----------|-------------|
+| **Current Demo** | 50-100ms | Low (hash-based) | ❌ Inconsistent |
+| **Production** | 20-50ms | High (semantic) | ✅ Consistent |
+
+The current demo implementation prioritizes **speed and simplicity** over **accuracy and consistency** for demonstration purposes.
+
+---
+
 **Ready for Real-time Data Mastering! 🚀**

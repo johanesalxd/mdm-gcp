@@ -226,12 +226,12 @@ class StreamingMDMProcessor:
         # For demo purposes, we'll use a simple approach
         # In production, this would use Spanner's vector search capabilities
 
-        # Get a sample of entities to compare against
+        # Get a sample of entities to compare against (reduced for demo performance)
         query = """
         SELECT entity_id, embedding
         FROM golden_entities
         WHERE embedding IS NOT NULL
-        LIMIT 50
+        LIMIT 10
         """
 
         results = self.spanner_helper.execute_sql(query)

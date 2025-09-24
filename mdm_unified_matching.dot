@@ -180,6 +180,10 @@ digraph Unified_MDM_Architecture {
   Architecture_Benefits [label="Unified Architecture Benefits:\n• Consistent entity IDs across systems\n• Aligned decision thresholds (0.8/0.6)\n• Proportional strategy weights\n• Daily synchronization\n• Production-ready scalability",
                    shape=note, fillcolor="#F0FFF0", style="filled,dashed"];
 
+  // Vector Embeddings Architecture Note
+  Vector_Embeddings_Note [label="Vector Embeddings Strategy (10-20% weight):\n• BigQuery generates embeddings in batch (cost-effective)\n• Vertex AI stores for fast similarity lookup only\n• Streaming queries existing embeddings, doesn't generate\n• Edge optimization, not foundation - exact/fuzzy solve 80%\n• See VECTOR_EMBEDDINGS_ARCHITECTURE.md for details",
+                         shape=note, fillcolor="#FFE6CC", style="filled,dashed"];
+
   // Layout hints (removed conflicting rank constraints for nodes in clusters)
   {rank=same; Auto_Merge; Human_Review}
 }

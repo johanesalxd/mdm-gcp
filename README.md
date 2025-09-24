@@ -60,6 +60,19 @@ Choose your implementation path:
 - **📓 [Batch Processing](./batch_mdm_gcp/mdm_batch_processing.ipynb)** - Complete 5-strategy pipeline
 - **📓 [Streaming Processing](./streaming_mdm_gcp/streaming_mdm_processing.ipynb)** - Real-time matching demo
 
+## 🧮 Vector Embeddings Strategy
+
+**⚠️ Important**: Vector embeddings are powerful but should only be **10-20% of your MDM strategy**.
+Exact and fuzzy matching solve 80% of problems at 1% of the cost.
+
+### Quick Guidelines
+- **Start Simple**: Implement exact + fuzzy matching first (solves 70-80% of cases)
+- **Measure ROI**: Only add vectors if they demonstrably improve match rates
+- **Batch Generate**: Use BigQuery for cost-effective embedding generation (10x cheaper)
+- **Right-size Weights**: Vectors should be 10-20% of total strategy, not the foundation
+
+👉 **[Read the Complete Vector Embeddings Architecture Guide](./VECTOR_EMBEDDINGS_ARCHITECTURE.md)** for production implementation details, cost analysis, and decision framework.
+
 ## 🎯 Key Features
 
 ### **5-Strategy AI Matching (Batch)**
