@@ -83,10 +83,12 @@ Exact and fuzzy matching solve 80% of problems at 1% of the cost.
 - 🤖 **AI Natural Language** (10%) - Gemini 2.5 Pro reasoning
 
 ### **4-Strategy Real-time Matching (Streaming)**
-- ⚡ **Exact Matching** (33%) - Proportionally adjusted
-- 🔍 **Fuzzy Matching** (28%) - Real-time string similarity
-- 🧮 **Vector Matching** (22%) - Cached embeddings
-- 📋 **Business Rules** (17%) - Low-latency rules
+- ⚡ **Exact Matching** (33.3%) - Email, phone, ID lookups
+- 🔍 **Fuzzy Matching** (27.8%) - Real-time string similarity
+- 🧮 **Vector Matching** (22.2%) - 🚧 *Currently limited (requires Vertex AI integration)*
+- 📋 **Business Rules** (16.7%) - Company/location logic
+
+**Note**: Vector matching is architecturally supported but operationally limited due to lack of real-time embedding generation. Full 4-way matching will be enabled when Vertex AI integration is added (+200-500ms latency cost).
 
 ### **Unified Configuration**
 - 🎯 **Aligned Thresholds** - Auto-merge: ≥0.8, Human review: 0.6-0.8

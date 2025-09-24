@@ -77,7 +77,7 @@ digraph Unified_MDM_Architecture {
       SP_Embeddings [label="Spanner + Embeddings\n(Same model as batch)", fillcolor="#ff9800", fontcolor="white"];
 
       // 4-Strategy Matching (proportionally adjusted)
-      SP_4_Strategy [label="4-Strategy Matching Engine\n• Exact (33%)\n• Fuzzy (28%)\n• Vector (22%)\n• Business (17%)", fillcolor="#ff9800", fontcolor="white"];
+      SP_4_Strategy [label="4-Strategy Matching Engine\n• Exact (33%)\n• Fuzzy (28%)\n• Vector (22%) 🚧 Limited\n• Business (17%)", fillcolor="#ff9800", fontcolor="white"];
 
       SP_Golden [label="Spanner Golden Records\n(Sub-second updates)\n(Same Deterministic IDs)", fillcolor="#ff9800", fontcolor="white"];
 
@@ -183,6 +183,10 @@ digraph Unified_MDM_Architecture {
   // Vector Embeddings Architecture Note
   Vector_Embeddings_Note [label="Vector Embeddings Strategy (10-20% weight):\n• BigQuery generates embeddings in batch (cost-effective)\n• Vertex AI stores for fast similarity lookup only\n• Streaming queries existing embeddings, doesn't generate\n• Edge optimization, not foundation - exact/fuzzy solve 80%\n• See VECTOR_EMBEDDINGS_ARCHITECTURE.md for details",
                          shape=note, fillcolor="#FFE6CC", style="filled,dashed"];
+
+  // Streaming Vector Limitation Note
+  Streaming_Vector_Note [label="Streaming Vector Limitation:\n• Vector matching architecturally supported but operationally limited\n• New records arrive without embeddings (no real-time generation)\n• Current behavior: Vector strategy contributes 0.0 to scores\n• Roadmap: Vertex AI integration for full 4-way matching\n• Expected impact: +200-500ms latency per record",
+                        shape=note, fillcolor="#FFF3E0", style="filled,dashed"];
 
   // Layout hints (removed conflicting rank constraints for nodes in clusters)
   {rank=same; Auto_Merge; Human_Review}

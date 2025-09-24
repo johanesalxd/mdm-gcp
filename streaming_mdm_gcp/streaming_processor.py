@@ -194,10 +194,22 @@ class StreamingMDMProcessor:
         return max(0.0, similarity)
 
     def find_vector_matches(self, record: Dict[str, Any], embedding: List[float]) -> List[Tuple[str, float, str]]:
-        """Find vector similarity matches using existing embeddings only"""
+        """
+        Find vector similarity matches using existing embeddings only
+
+        🚧 CURRENT LIMITATION: Vector matching is architecturally supported but operationally
+        limited due to lack of real-time embedding generation for new streaming records.
+
+        📋 ROADMAP: Full 4-way matching will be enabled when Vertex AI integration is added
+        for on-the-fly embedding generation (+200-500ms latency cost per record).
+
+        Current behavior: Always returns empty for new streaming records (no embeddings).
+        """
         # Skip vector matching if no embedding provided (streaming records don't generate embeddings)
         if not embedding:
-            print(f"  🧮 Vector matching: Skipped (no embedding for streaming record)")
+            print(
+                f"  🧮 Vector matching: Deferred (real-time embedding generation pending)")
+            print(f"  📋 Note: Full 4-way matching requires Vertex AI integration")
             return []
 
         try:

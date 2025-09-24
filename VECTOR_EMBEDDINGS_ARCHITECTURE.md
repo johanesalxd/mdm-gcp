@@ -188,12 +188,40 @@ The Spanner-native approach provides the optimal balance of simplicity, performa
 
 ## 🔄 **Streaming MDM with Traditional 4-Way Matching**
 
-### **🎯 Simplified Streaming Architecture**
+### **🚧 Current Streaming Limitations**
 
-For streaming MDM, we use a straightforward **traditional 4-way matching** approach that balances simplicity with effectiveness.
+**Important**: The current streaming implementation has a **vector matching limitation** that affects the 4-way strategy:
+
+#### **Current Reality:**
+- ✅ **Exact Matching**: Fully operational (email/phone indexes)
+- ✅ **Fuzzy Matching**: Fully operational (name/address similarity)
+- 🚧 **Vector Matching**: **Architecturally supported but operationally limited**
+- ✅ **Business Rules**: Fully operational (company/location logic)
+
+**Root Cause**: New streaming records arrive **without embeddings**, and the system doesn't generate them in real-time.
+
+#### **Impact on Scoring:**
+- **Intended Weights**: Exact 33.3%, Fuzzy 27.8%, Vector 22.2%, Business 16.7%
+- **Effective Weights**: Vector always contributes 0.0, reducing total score space to ~78%
+- **Workaround**: Other strategies compensate, but vector insights are lost
+
+### **📋 Roadmap: Full 4-Way Implementation**
+
+**Phase 1: Current (3.x-Way Effective)**
+- Exact + Fuzzy + Business rules working
+- Vector matching deferred
+
+**Phase 2: Future (True 4-Way)**
+- Add Vertex AI integration for real-time embedding generation
+- Expected latency impact: +200-500ms per record
+- Cost impact: ~$0.10-0.50 per 1K records
+
+### **🎯 Current Streaming Architecture**
+
+Despite the vector limitation, the streaming system provides effective entity resolution:
 
 #### **The Core Approach:**
-- **Run all 4 strategies** for every streaming record
+- **Run all 4 strategies** for every streaming record (vector returns empty)
 - **Immediate golden record creation** in Spanner for real-time use
 - **Stage all new entities** for future batch processing enhancement
 
