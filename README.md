@@ -34,16 +34,6 @@ A comprehensive, production-ready MDM solution demonstrating both **batch** and 
 - **🔄 [Unified Implementation](./mdm_unified_implementation.md)** - Aligned batch + streaming architecture
 - **🎯 [Architecture Overview](#architecture-overview)** - Visual diagrams and design decisions
 
-## 📊 Results & Performance
-
-| Metric | Batch (BigQuery) | Streaming (Spanner) |
-|--------|------------------|---------------------|
-| **Processing Time** | 5-10 minutes | Sub-400ms |
-| **Strategies** | 5 (with AI) | 4 (optimized) |
-| **Deduplication** | 64.8% (284→100) | Real-time updates |
-| **Thresholds** | Auto: ≥0.8, Review: 0.6-0.8 | Aligned thresholds |
-| **Use Case** | Analytics, ML | Operational apps |
-
 ## 🏗️ Architecture Overview
 
 ### **🎨 Architecture Diagrams**
@@ -66,9 +56,7 @@ A comprehensive, production-ready MDM solution demonstrating both **batch** and 
 - **Impact**: Effective 3.x-way matching vs intended 4-way matching
 
 ### **Roadmap**
-- **Phase 1 (Current)**: 3.x-way effective matching + limited entity sync
-- **Phase 2 (Future)**: Full 4-way matching + complete entity sync pipeline
-- **Expected Cost**: +200-500ms latency, ~$0.10-0.50 per 1K records
+- **Streaming**: Full 4-way matching + complete entity sync pipeline
 
 👉 **[Read Complete Limitations & Roadmap](./mdm_unified_implementation.md#current-streaming-limitations)** for detailed technical analysis and enhancement plans.
 
@@ -134,9 +122,3 @@ Exact and fuzzy matching solve 80% of problems at 1% of the cost.
 - [Spanner Documentation](https://cloud.google.com/spanner/docs)
 - [Vertex AI Embeddings](https://cloud.google.com/vertex-ai/docs/generative-ai/embeddings/get-text-embeddings)
 - [BigQuery Vector Search](https://cloud.google.com/bigquery/docs/vector-search-intro)
-
----
-
-**Ready for Production MDM! 🎯**
-
-Choose your path: [Batch](./batch_mdm_gcp/MDM_BATCH_PROCESSING.md) | [Streaming](./streaming_mdm_gcp/MDM_STREAMING_PROCESSING.md) | [Unified](./mdm_unified_implementation.md)

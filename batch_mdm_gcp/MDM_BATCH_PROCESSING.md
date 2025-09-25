@@ -42,21 +42,14 @@ The notebook generates **200+ realistic customer records** representing:
    uv sync
    ```
 
-2. **Create Vertex AI connection in BigQuery**:
-   ```bash
-   # Replace YOUR_PROJECT_ID with your actual project ID
-   bq mk --connection --location=US --connection_type=CLOUD_RESOURCE vertex-ai-connection
-   ```
-
-3. **Configure the notebook**:
+2. **Configure the notebook**:
    - Open `mdm_batch_processing.ipynb`
    - Update these variables in the configuration cell:
      ```python
      PROJECT_ID = "your-gcp-project-id"  # Your GCP project ID
-     CONNECTION_NAME = "vertex-ai-connection"  # Your connection name
      ```
 
-4. **Run the notebook**:
+3. **Run the notebook**:
    ```bash
    # From the project root
    jupyter lab batch_mdm_gcp/mdm_batch_processing.ipynb

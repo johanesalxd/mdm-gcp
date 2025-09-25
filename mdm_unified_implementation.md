@@ -169,9 +169,7 @@ flowchart TB
   - Advanced analytics and ML model training
 
 ### **Roadmap**
-- **Phase 1 (Current)**: 3.x-way effective matching + limited entity sync
-- **Phase 2 (Future)**: Full 4-way matching + complete entity sync pipeline
-- **Expected Impact**: +200-500ms latency, ~$0.10-0.50 per 1K records
+- **Streaming**: Full 4-way matching + complete entity sync pipeline
 
 ## 🎯 **System Alignment Summary**
 
@@ -228,10 +226,11 @@ The unified MDM architecture supports two processing paths:
 This unified implementation guide provides a complete framework for building production-ready MDM systems that can handle both batch and streaming data with:
 
 ✅ **Fully Aligned Systems**: Consistent configurations between batch and streaming
+
 ✅ **Deterministic Entity IDs**: Same customer gets same ID across both systems
+
 ✅ **Synchronized Thresholds**: Identical decision making (0.8 auto-merge, 0.6 human review)
+
 ✅ **Proportional Weights**: Mathematically adjusted weights for streaming (4-strategy)
 
 The combination of BigQuery's analytical power with Spanner's real-time capabilities creates a powerful unified MDM solution that maintains data consistency while delivering both comprehensive batch analysis and sub-second streaming performance.
-
-**Ready for Production MDM! 🚀**
