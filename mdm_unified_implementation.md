@@ -1,22 +1,53 @@
 # Unified MDM Implementation Guide: Batch + Streaming
 
-This guide provides practical implementation examples for building a unified Master Data Management system that handles both batch and streaming data using GCP services.
+This guide provides the strategic framework for building a unified Master Data Management system that handles both batch and streaming data using GCP services.
 
 ## 🎯 **What This Guide Covers**
 
 This unified implementation demonstrates **production-ready MDM** with both batch and streaming processing paths:
 
 - **✅ Fully Aligned Systems**: Batch (5-strategy) and Streaming (4-strategy) with consistent configurations
+- **✅ Vector Strategy**: Cost-effective approach with proper weight allocation (10-20% of total strategy)
+- **✅ Current Limitations**: Documentation of streaming vector gaps and roadmap
 - **✅ Deterministic Entity IDs**: Same customer gets same ID across both systems
 - **✅ Synchronized Thresholds**: Identical decision making (0.8 auto-merge, 0.6 human review)
-- **✅ Proportional Weights**: Streaming uses mathematically adjusted weights from batch
 - **✅ Production Architecture**: Complete synchronization between BigQuery ↔ Spanner
 
-## 📚 **For Detailed Implementation Guides**
+## ⚠️ **Vector Embeddings Strategy: Don't Overcomplicate!**
 
-- **📊 Batch Processing Details**: See [`batch_mdm_gcp/MDM_BATCH_PROCESSING.md`](./batch_mdm_gcp/MDM_BATCH_PROCESSING.md) - Complete 5-strategy implementation with AI
-- **⚡ Streaming Processing Details**: See [`streaming_mdm_gcp/MDM_STREAMING_PROCESSING.md`](./streaming_mdm_gcp/MDM_STREAMING_PROCESSING.md) - Real-time 4-strategy implementation
-- **📈 Batch Results & Demo**: See [`batch_mdm_gcp/MDM_BATCH_RESULTS.md`](./batch_mdm_gcp/MDM_BATCH_RESULTS.md) - Comprehensive results analysis
+**Vector embeddings should only be 10-20% of your MDM strategy.** In most production systems, exact and fuzzy matching solve 80% of problems at 1% of the cost.
+
+### **🥇 Production Strategy Priorities**
+
+| Strategy | Typical Weight | Cost | Speed | Use When |
+|----------|---------------|------|-------|----------|
+| **Exact Match** | 35-45% | $ | ⚡⚡⚡ | Email, phone, ID available |
+| **Fuzzy Match** | 25-35% | $$ | ⚡⚡ | Names, addresses with typos |
+| **Business Rules** | 15-25% | $ | ⚡⚡⚡ | Domain-specific logic |
+| **Vector Embeddings** | 10-20% | $$$$ | ⚡ | Unstructured text, multi-lingual |
+| **AI/LLM** | 5-10% | $$$$$ | ⚡ | Last resort, complex cases |
+
+**👉 Start with exact + fuzzy matching. Add vectors only if they demonstrably improve your match rates.**
+
+### **🎯 When to Use Vector Embeddings**
+
+**✅ Good Use Cases:**
+- Unstructured data (product descriptions, clinical notes)
+- Multi-lingual requirements (global companies)
+- Weak identifiers (no email/phone/ID available)
+- Semantic matching ("Software Engineer" = "Developer")
+
+**❌ Don't Use Vectors When:**
+- Strong identifiers available (email, phone, unique IDs)
+- Simple data variations (basic typos)
+- Cost-sensitive environments
+- Audit/compliance requirements (need explainable decisions)
+
+## 📚 **For Detailed Implementation**
+
+- **📊 Batch Processing**: [`batch_mdm_gcp/MDM_BATCH_PROCESSING.md`](./batch_mdm_gcp/MDM_BATCH_PROCESSING.md) - Complete 5-strategy implementation with AI
+- **⚡ Streaming Processing**: [`streaming_mdm_gcp/MDM_STREAMING_PROCESSING.md`](./streaming_mdm_gcp/MDM_STREAMING_PROCESSING.md) - Real-time 4-strategy implementation
+- **📈 Results & Demo**: [`batch_mdm_gcp/MDM_BATCH_RESULTS.md`](./batch_mdm_gcp/MDM_BATCH_RESULTS.md) - Comprehensive analysis
 
 ## Architecture Overview
 
@@ -46,13 +77,13 @@ flowchart TB
     subgraph StreamPath["⚡ Streaming Processing Path (Spanner)"]
         SP_INGEST["Real-time Ingestion<br/>100 records/second"]
         SP_STANDARD["Live Standardization<br/>Same patterns as batch"]
-        SP_EMBED["Vector Generation<br/>Same model as batch"]
+        SP_EMBED["Embeddings (Limited)<br/>Existing embeddings only<br/>No real-time generation"]
 
         subgraph SP_MATCH["4-Strategy Matching Engine"]
-            SP_EXACT["⚡ Exact Matching<br/>Email, Phone, ID<br/>Weight: 33% (30/90)"]
-            SP_FUZZY["🔍 Fuzzy Matching<br/>Name, Address similarity<br/>Weight: 28% (25/90)"]
-            SP_VECTOR["🧮 Vector Matching<br/>Semantic similarity<br/>Weight: 22% (20/90)"]
-            SP_BUSINESS["📋 Business Rules<br/>Company, Location<br/>Weight: 17% (15/90)"]
+            SP_EXACT["⚡ Exact Matching<br/>Email, Phone, ID<br/>Weight: 33.3%"]
+            SP_FUZZY["🔍 Fuzzy Matching<br/>Name, Address similarity<br/>Weight: 27.8%"]
+            SP_VECTOR["🧮 Vector Matching 🚧<br/>Currently Limited<br/>Weight: 22.2% (intended)"]
+            SP_BUSINESS["📋 Business Rules<br/>Company, Location<br/>Weight: 16.7%"]
         end
 
         SP_GOLDEN["🏆 Live Golden Records<br/>Sub-second updates<br/>Same deterministic IDs"]
@@ -60,8 +91,9 @@ flowchart TB
 
     subgraph Sync["🔄 Synchronization Layer"]
         MORNING["🌅 Morning Sync<br/>BigQuery → Spanner<br/>Load batch results"]
-        CONTINUOUS["⏰ Continuous<br/>Spanner updates<br/>Real-time processing"]
-        EVENING["🌆 Evening Sync<br/>Spanner → BigQuery<br/>Analytics feed"]
+        CONTINUOUS["⏰ Continuous<br/>Spanner updates<br/>Real-time processing only"]
+        EVENING["🌆 Evening Sync 🚧<br/>Spanner → BigQuery<br/>Analytics only (Limited)"]
+        NEW_ENTITY_GAP["🚧 New Entity Gap<br/>Streaming entities not<br/>processed by BigQuery batch"]
     end
 
     subgraph Decision["⚖️ Aligned Decision Making"]
@@ -117,6 +149,30 @@ flowchart TB
     class THRESHOLDS,IDS decisionStyle
 ```
 
+## 🚧 **Current Streaming Limitations**
+
+**Important**: The streaming implementation has two key limitations that affect the unified architecture:
+
+### **1. Vector Matching Limitation**
+- ✅ **Exact, Fuzzy, Business**: Fully operational
+- 🚧 **Vector Matching**: Architecturally supported but operationally limited
+- **Root Cause**: New streaming records arrive without embeddings (no real-time generation)
+- **Current Behavior**: Vector strategy contributes 0.0 to all scores
+
+### **2. Entity Sync Limitation**
+- ✅ **BigQuery → Spanner**: Morning sync working (loads batch results)
+- 🚧 **Spanner → BigQuery**: Limited (new streaming entities not processed)
+- **Root Cause**: No automated pipeline to process new Spanner entities in BigQuery
+- **Current Behavior**: New streaming entities remain in Spanner only, missing:
+  - Full 5-strategy matching with AI
+  - Embedding generation via BigQuery ML
+  - Advanced analytics and ML model training
+
+### **Roadmap**
+- **Phase 1 (Current)**: 3.x-way effective matching + limited entity sync
+- **Phase 2 (Future)**: Full 4-way matching + complete entity sync pipeline
+- **Expected Impact**: +200-500ms latency, ~$0.10-0.50 per 1K records
+
 ## 🎯 **System Alignment Summary**
 
 | Aspect | Batch (BigQuery) | Streaming (Spanner) | Status |
@@ -124,12 +180,13 @@ flowchart TB
 | **Strategies** | 5 (Exact, Fuzzy, Vector, Business, AI) | 4 (Exact, Fuzzy, Vector, Business) | ✅ Aligned |
 | **Auto-merge** | ≥0.8 | ≥0.8 | ✅ Aligned |
 | **Human review** | 0.6-0.8 | 0.6-0.8 | ✅ Aligned |
-| **Exact weight** | 30% | 33% (proportional) | ✅ Aligned |
-| **Fuzzy weight** | 25% | 28% (proportional) | ✅ Aligned |
-| **Vector weight** | 20% | 22% (proportional) | ✅ Aligned |
-| **Business weight** | 15% | 17% (proportional) | ✅ Aligned |
+| **Exact weight** | 30% | 33.3% (aligned) | ✅ Aligned |
+| **Fuzzy weight** | 25% | 27.8% (aligned) | ✅ Aligned |
+| **Vector weight** | 20% | 22.2% (intended) 🚧 Limited | ⚠️ Gap Exists |
+| **Business weight** | 15% | 16.7% (aligned) | ✅ Aligned |
 | **Entity IDs** | Deterministic hash | Same deterministic hash | ✅ Aligned |
 | **Standardization** | Regex patterns | Same regex patterns | ✅ Aligned |
+| **New Entity Processing** | Processes all entities | Creates entities, no batch processing | ⚠️ Gap Exists |
 
 The unified MDM architecture supports two processing paths:
 - **Batch Path**: Cost-effective, 5-strategy processing using BigQuery with AI
@@ -174,11 +231,6 @@ This unified implementation guide provides a complete framework for building pro
 ✅ **Deterministic Entity IDs**: Same customer gets same ID across both systems
 ✅ **Synchronized Thresholds**: Identical decision making (0.8 auto-merge, 0.6 human review)
 ✅ **Proportional Weights**: Mathematically adjusted weights for streaming (4-strategy)
-✅ **Production Synchronization**: Complete BigQuery ↔ Spanner data flow
-✅ **Comprehensive Monitoring**: Real-time metrics and alerting
-✅ **Migration Guidance**: Step-by-step path from batch to hybrid to streaming
-✅ **Cost Optimization**: Strategies for reducing operational costs
-✅ **Multi-Region Support**: Global deployment patterns
 
 The combination of BigQuery's analytical power with Spanner's real-time capabilities creates a powerful unified MDM solution that maintains data consistency while delivering both comprehensive batch analysis and sub-second streaming performance.
 

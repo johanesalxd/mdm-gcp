@@ -4,11 +4,20 @@ A comprehensive, production-ready MDM solution demonstrating both **batch** and 
 
 ## 🚀 Quick Start
 
-Choose your implementation path:
+### **📚 Choose Your Path**
 
-- **📊 [Batch Processing Guide](./batch_mdm_gcp/MDM_BATCH_PROCESSING.md)** - Complete 5-strategy implementation using BigQuery
-- **⚡ [Streaming Processing Guide](./streaming_mdm_gcp/MDM_STREAMING_PROCESSING.md)** - Real-time 4-strategy implementation using Spanner
-- **🔄 [Unified Implementation Guide](./mdm_unified_implementation.md)** - Production-ready aligned architecture
+| Goal | Recommended Path | Description |
+|------|------------------|-------------|
+| **🎯 Strategic Overview** | [Unified Implementation Guide](./mdm_unified_implementation.md) | Complete architecture framework, limitations, roadmap |
+| **📊 Batch Implementation** | [Batch Processing Guide](./batch_mdm_gcp/MDM_BATCH_PROCESSING.md) | 5-strategy BigQuery implementation with AI |
+| **⚡ Streaming Implementation** | [Streaming Processing Guide](./streaming_mdm_gcp/MDM_STREAMING_PROCESSING.md) | 4-strategy Spanner real-time processing |
+| **🔍 Quick Demo** | [Interactive Notebooks](#interactive-notebooks) | Hands-on exploration and testing |
+| **🏗️ Architecture Deep Dive** | [Architecture Diagrams](#architecture-diagrams) | Visual representations and design patterns |
+
+### **🎯 New to MDM?**
+1. **Start Here**: [Unified Implementation Guide](./mdm_unified_implementation.md) - Strategic framework and vector strategy
+2. **Then Choose**: [Batch](./batch_mdm_gcp/MDM_BATCH_PROCESSING.md) for analytics or [Streaming](./streaming_mdm_gcp/MDM_STREAMING_PROCESSING.md) for real-time
+3. **Explore**: [Interactive Notebooks](#interactive-notebooks) for hands-on experience
 
 ## 📚 Implementation Guides
 
@@ -37,16 +46,31 @@ Choose your implementation path:
 
 ## 🏗️ Architecture Overview
 
-### Core Architectures
+### **🎨 Architecture Diagrams**
 
 ![Unified MDM Architecture](images/mdm_unified_matching.png)
 
 **Unified Batch + Streaming Architecture** - Production-ready aligned implementation
 
-### Additional Views
-- ![Complete Architecture](images/mdm_architecture.png) - **Complete MDM** (DIY + 3rd-party approaches)
-- ![GCP Native](images/mdm_architecture_gcp.png) - **GCP Native** (DIY approach only)
-- ![Third-Party](images/mdm_architecture_3pt.png) - **Third-Party** integration patterns
+#### **Diagram Sources**
+- **🔄 [Unified Architecture Diagram](./mdm_unified_matching.dot)** - Complete visual representation (Graphviz source)
+- **📊 [PNG Export](./images/mdm_unified_matching.png)** - Ready-to-use image
+
+## 🚧 **Current Limitations & Roadmap**
+
+**Important**: The streaming implementation has limitations that affect the unified architecture:
+
+### **Key Limitations**
+- 🚧 **Vector Matching**: New streaming records arrive without embeddings (no real-time generation)
+- 🚧 **Entity Sync**: New streaming entities not processed by BigQuery batch pipeline
+- **Impact**: Effective 3.x-way matching vs intended 4-way matching
+
+### **Roadmap**
+- **Phase 1 (Current)**: 3.x-way effective matching + limited entity sync
+- **Phase 2 (Future)**: Full 4-way matching + complete entity sync pipeline
+- **Expected Cost**: +200-500ms latency, ~$0.10-0.50 per 1K records
+
+👉 **[Read Complete Limitations & Roadmap](./mdm_unified_implementation.md#current-streaming-limitations)** for detailed technical analysis and enhancement plans.
 
 ## 💻 Code & Utilities
 
@@ -71,7 +95,7 @@ Exact and fuzzy matching solve 80% of problems at 1% of the cost.
 - **Batch Generate**: Use BigQuery for cost-effective embedding generation (10x cheaper)
 - **Right-size Weights**: Vectors should be 10-20% of total strategy, not the foundation
 
-👉 **[Read the Complete Vector Embeddings Architecture Guide](./VECTOR_EMBEDDINGS_ARCHITECTURE.md)** for production implementation details, cost analysis, and decision framework.
+👉 **[Read the Complete Vector Strategy Guide](./mdm_unified_implementation.md#vector-embeddings-strategy-dont-overcomplicate)** for production implementation details, cost analysis, and decision framework.
 
 ## 🎯 Key Features
 

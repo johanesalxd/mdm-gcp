@@ -74,10 +74,10 @@ digraph Unified_MDM_Architecture {
       // Stream ingestion
       SP_Ingest [label="Spanner Real-time Ingestion\n(100 records/second)", fillcolor="#ff9800", fontcolor="white"];
       SP_Standardization [label="Live Standardization\n(Same patterns as batch)", shape=ellipse, fillcolor="#ff9800", fontcolor="white"];
-      SP_Embeddings [label="Spanner + Embeddings\n(Same model as batch)", fillcolor="#ff9800", fontcolor="white"];
+      SP_Embeddings [label="Spanner + Embeddings 🚧\n(Existing embeddings only)\n(No real-time generation)", fillcolor="#ff9800", fontcolor="white"];
 
       // 4-Strategy Matching (proportionally adjusted)
-      SP_4_Strategy [label="4-Strategy Matching Engine\n• Exact (33%)\n• Fuzzy (28%)\n• Vector (22%) 🚧 Limited\n• Business (17%)", fillcolor="#ff9800", fontcolor="white"];
+      SP_4_Strategy [label="4-Strategy Matching Engine\n• Exact (33.3%)\n• Fuzzy (27.8%)\n• Vector (22.2%) 🚧 Limited\n• Business (16.7%)", fillcolor="#ff9800", fontcolor="white"];
 
       SP_Golden [label="Spanner Golden Records\n(Sub-second updates)\n(Same Deterministic IDs)", fillcolor="#ff9800", fontcolor="white"];
 
@@ -97,7 +97,10 @@ digraph Unified_MDM_Architecture {
       bgcolor="#F3E5F5";
 
       Morning_Sync [label="Morning Sync\nBigQuery → Spanner\n(Load batch results)", fillcolor="#9c27b0", fontcolor="white"];
-      Evening_Sync [label="Evening Sync\nSpanner → BigQuery\n(Analytics feed)", fillcolor="#9c27b0", fontcolor="white"];
+      Evening_Sync [label="Evening Sync 🚧\nSpanner → BigQuery\n(Analytics only - Limited)", fillcolor="#9c27b0", fontcolor="white"];
+
+      Entity_Sync_Gap [label="🚧 Entity Sync Limitation:\n• New streaming entities not processed by BigQuery\n• Missing full 5-strategy matching with AI\n• No embedding generation for new entities\n• Roadmap: Complete entity sync pipeline",
+                       shape=note, fillcolor="#FFF3E0", style="filled,dashed"];
 
       BQ_Golden -> Morning_Sync;
       Morning_Sync -> SP_Golden;
@@ -181,7 +184,7 @@ digraph Unified_MDM_Architecture {
                    shape=note, fillcolor="#F0FFF0", style="filled,dashed"];
 
   // Vector Embeddings Architecture Note
-  Vector_Embeddings_Note [label="Vector Embeddings Strategy (10-20% weight):\n• BigQuery generates embeddings in batch (cost-effective)\n• Vertex AI stores for fast similarity lookup only\n• Streaming queries existing embeddings, doesn't generate\n• Edge optimization, not foundation - exact/fuzzy solve 80%\n• See VECTOR_EMBEDDINGS_ARCHITECTURE.md for details",
+  Vector_Embeddings_Note [label="Vector Embeddings Strategy (10-20% weight):\n• BigQuery generates embeddings in batch (cost-effective)\n• Vertex AI stores for fast similarity lookup only\n• Streaming queries existing embeddings, doesn't generate\n• Edge optimization, not foundation - exact/fuzzy solve 80%\n• See mdm_unified_implementation.md for details",
                          shape=note, fillcolor="#FFE6CC", style="filled,dashed"];
 
   // Streaming Vector Limitation Note
