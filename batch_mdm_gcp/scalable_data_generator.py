@@ -6,24 +6,21 @@ Creates realistic customer data with cross-chunk duplicates and BigQuery streami
 import argparse
 from concurrent.futures import as_completed
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict
 from dataclasses import dataclass
 from datetime import datetime
-from datetime import timedelta
-import hashlib
+from datetime import UTC
 import json
 import os
 import pickle
 import random
 import sys
+import threading
 import time
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Set
 import uuid
 
 from faker import Faker
 from google.cloud import bigquery
-from google.cloud.exceptions import NotFound
-import pandas as pd
 import psutil
 
 # Initialize Faker with fixed seed for reproducibility
@@ -85,6 +82,11 @@ class CustomerPool:
         # customer_id -> set of chunks
         self.generation_history: Dict[str, Set[int]] = {}
 
+        # Thread-safe locks for parallel processing
+        self._customers_lock = threading.RLock()
+        self._history_lock = threading.RLock()
+        self._state_lock = threading.RLock()
+
     def create_base_customer(self, customer_id: str) -> Dict[str, Any]:
         """Create a base customer profile"""
         first_name = fake.first_name()
@@ -116,23 +118,27 @@ class CustomerPool:
         return customer
 
     def get_or_create_customer(self, customer_id: str) -> Dict[str, Any]:
-        """Get existing customer or create new one"""
-        if customer_id not in self.customers:
-            self.customers[customer_id] = self.create_base_customer(
-                customer_id)
-            self.customer_ids.append(customer_id)
-            self.generation_history[customer_id] = set()
+        """Get existing customer or create new one (thread-safe)"""
+        with self._customers_lock:
+            if customer_id not in self.customers:
+                self.customers[customer_id] = self.create_base_customer(
+                    customer_id)
+                self.customer_ids.append(customer_id)
+                with self._history_lock:
+                    self.generation_history[customer_id] = set()
 
-        return self.customers[customer_id].copy()
+            return self.customers[customer_id].copy()
 
     def mark_customer_used(self, customer_id: str, chunk_id: int):
-        """Mark that a customer was used in a specific chunk"""
-        if customer_id not in self.generation_history:
-            self.generation_history[customer_id] = set()
-        self.generation_history[customer_id].add(chunk_id)
+        """Mark that a customer was used in a specific chunk (thread-safe)"""
+        with self._history_lock:
+            if customer_id not in self.generation_history:
+                self.generation_history[customer_id] = set()
+            self.generation_history[customer_id].add(chunk_id)
 
-        if customer_id in self.customers:
-            self.customers[customer_id]['last_updated_chunk'] = chunk_id
+        with self._customers_lock:
+            if customer_id in self.customers:
+                self.customers[customer_id]['last_updated_chunk'] = chunk_id
 
     def get_cross_chunk_candidates(self, chunk_id: int, count: int) -> List[str]:
         """Get customer IDs that should appear as cross-chunk duplicates"""
@@ -221,6 +227,9 @@ class ScalableMDMGenerator:
         self.customer_pool = CustomerPool(config)
         self.bq_client = bigquery.Client(project=config.project_id)
         self.generation_state = self.load_generation_state()
+
+        # Thread-safe locks for state management
+        self._state_lock = threading.RLock()
 
         # Variation functions (from original generator)
         self.variations = {
@@ -352,7 +361,7 @@ class ScalableMDMGenerator:
         varied_customer['source_system'] = source
         varied_customer['record_id'] = str(uuid.uuid4())
         varied_customer['chunk_id'] = chunk_id
-        varied_customer['generation_timestamp'] = datetime.utcnow()
+        varied_customer['generation_timestamp'] = datetime.now(UTC)
 
         # Apply variations (same logic as original generator)
         if random.random() < self.config.variation_chance:
@@ -583,7 +592,7 @@ class ScalableMDMGenerator:
             'chunk_id': chunk_id,
             'records_generated': total_records_generated,
             'processing_time': chunk_time,
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': datetime.now(UTC).isoformat()
         })
         self.generation_state['last_completed_chunk'] = chunk_id
         self.save_generation_state()
@@ -629,20 +638,51 @@ class ScalableMDMGenerator:
         if start_chunk > 0:
             print(f"🔄 Resuming from chunk {start_chunk + 1}")
 
-        # Generate chunks
-        for chunk_id in range(start_chunk, total_chunks):
-            success = self.generate_chunk(chunk_id)
-            if not success:
-                print(f"❌ Failed to generate chunk {chunk_id}")
+        # Generate chunks using multi-threading for better core utilization
+        print(
+            f"🔄 Using {self.config.max_workers} worker threads for parallel processing")
+
+        # Use ThreadPoolExecutor for parallel chunk generation
+        with ThreadPoolExecutor(max_workers=self.config.max_workers) as executor:
+            # Submit all chunk tasks
+            chunk_futures = {}
+            for chunk_id in range(start_chunk, total_chunks):
+                future = executor.submit(self.generate_chunk, chunk_id)
+                chunk_futures[future] = chunk_id
+
+            # Process completed chunks as they finish
+            completed_chunks = 0
+            failed_chunks = []
+
+            for future in as_completed(chunk_futures):
+                chunk_id = chunk_futures[future]
+                try:
+                    success = future.result()
+                    if not success:
+                        failed_chunks.append(chunk_id)
+                        print(f"❌ Failed to generate chunk {chunk_id}")
+                    else:
+                        completed_chunks += 1
+
+                        # Progress reporting
+                        progress = (completed_chunks /
+                                    (total_chunks - start_chunk)) * 100
+                        elapsed_time = time.time() - start_time
+                        if completed_chunks > 0:
+                            eta = (elapsed_time / completed_chunks) * \
+                                (total_chunks - start_chunk - completed_chunks)
+                            print(
+                                f"  📈 Progress: {progress:.1f}% | Completed: {completed_chunks}/{total_chunks - start_chunk} | ETA: {eta/3600:.1f}h")
+
+                except Exception as e:
+                    failed_chunks.append(chunk_id)
+                    print(f"❌ Exception in chunk {chunk_id}: {e}")
+
+            # Check for any failures
+            if failed_chunks:
+                print(
+                    f"❌ Failed to generate {len(failed_chunks)} chunks: {failed_chunks}")
                 return False
-
-            # Progress reporting
-            progress = ((chunk_id + 1) / total_chunks) * 100
-            elapsed_time = time.time() - start_time
-            eta = (elapsed_time / (chunk_id + 1 - start_chunk)) * \
-                (total_chunks - chunk_id - 1)
-
-            print(f"  📈 Progress: {progress:.1f}% | ETA: {eta/3600:.1f}h")
 
         # Final save
         self.customer_pool.save_state()
@@ -670,13 +710,14 @@ class ScalableMDMGenerator:
         return {
             'completed_chunks': [],
             'last_completed_chunk': -1,
-            'start_time': datetime.utcnow().isoformat()
+            'start_time': datetime.now(UTC).isoformat()
         }
 
     def save_generation_state(self):
-        """Save generation state to disk"""
-        with open(self.config.state_file, 'w') as f:
-            json.dump(self.generation_state, f, indent=2)
+        """Save generation state to disk (thread-safe)"""
+        with self._state_lock:
+            with open(self.config.state_file, 'w') as f:
+                json.dump(self.generation_state, f, indent=2)
 
 
 def main():
@@ -704,8 +745,25 @@ def main():
                         help='Enable append mode with unique batch ID')
     parser.add_argument('--batch-id', type=str, default='',
                         help='Custom batch ID for append mode (auto-generated if not provided)')
+    parser.add_argument('--restart', action='store_true',
+                        help='Delete existing state files and start completely fresh')
 
     args = parser.parse_args()
+
+    # Handle restart option
+    if args.restart:
+        state_files = ['generator_state.json', 'customer_pool.pkl']
+        removed_files = []
+        for state_file in state_files:
+            if os.path.exists(state_file):
+                os.remove(state_file)
+                removed_files.append(state_file)
+
+        if removed_files:
+            print(
+                f"🗑️ Removed state files for fresh restart: {', '.join(removed_files)}")
+        else:
+            print("🗑️ No existing state files found - starting fresh")
 
     # Generate batch ID if in append mode
     batch_id = ""
