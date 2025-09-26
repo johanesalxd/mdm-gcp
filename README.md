@@ -34,6 +34,14 @@ A comprehensive, production-ready MDM solution demonstrating both **batch** and 
 - **🔄 [Unified Implementation](./mdm_unified_implementation.md)** - Aligned batch + streaming architecture
 - **🎯 [Architecture Overview](#architecture-overview)** - Visual diagrams and design decisions
 
+## 🏛️ Architectural Deep Dives & Comparisons
+
+For a deeper understanding of the architectural decisions and comparisons against other systems, see these guides.
+
+-   **[BigQuery vs. Traditional MDM](./batch_mdm_gcp/MDM_BATCH_COMPARISON.md)**: A detailed comparison showing how the BigQuery-native approach replaces each component of a traditional, siloed MDM stack (e.g., Informatica, IBM).
+-   **[The Streaming Journey](./streaming_mdm_gcp/MDM_STREAMING_JOURNEY.md)**: A step-by-step guide to the streaming architecture, explaining the speed vs. accuracy trade-offs and the hybrid synchronization patterns.
+-   **[Presentation Overview](./presentation.md)**: A high-level presentation-style document summarizing the project's goals, architecture, and key features.
+
 ## 🏗️ Architecture Overview
 
 ### **🎨 Architecture Diagrams**

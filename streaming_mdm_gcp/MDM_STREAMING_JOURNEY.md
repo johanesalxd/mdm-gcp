@@ -92,6 +92,7 @@ flowchart TD
         subgraph New ["🆕 New Record Path"]
             F_NEW["Step 4a: Generate ID<br/>generate_deterministic_entity_id()"]
             G_NEW["Step 5a: Create Record<br/>create_new_golden_record()"]
+            I_NEW["Step 5b: Stage for Batch<br/>stage_new_entity()"]
         end
         subgraph Merge ["🔄 Existing Record Path"]
             F_MERGE["Step 4b: Get Existing ID"]
@@ -109,7 +110,8 @@ flowchart TD
     E -- "Score ≥ 0.8<br/>(AUTO_MERGE)" --> F_MERGE
     F_NEW --> G_NEW
     F_MERGE --> G_MERGE
-    G_NEW --> H
+    G_NEW --> I_NEW
+    I_NEW --> H
     G_MERGE --> H
 
     style F_NEW fill:#d4edda,stroke:#155724
