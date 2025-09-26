@@ -40,7 +40,8 @@ For a deeper understanding of the architectural decisions and comparisons agains
 
 -   **[BigQuery vs. Traditional MDM](./batch_mdm_gcp/MDM_BATCH_COMPARISON.md)**: A detailed comparison showing how the BigQuery-native approach replaces each component of a traditional, siloed MDM stack (e.g., Informatica, IBM).
 -   **[The Streaming Journey](./streaming_mdm_gcp/MDM_STREAMING_JOURNEY.md)**: A step-by-step guide to the streaming architecture, explaining the speed vs. accuracy trade-offs and the hybrid synchronization patterns.
--   **[Presentation Overview](./presentation.md)**: A high-level presentation-style document summarizing the project's goals, architecture, and key features.
+-   **[Presentation Overview](./presentation.md)**: A high-level presentation-style document with rich formatting (emojis, HTML) for VS Code viewing
+-   **[GitHub-Compatible Presentation](./presentation_github.md)**: Same content optimized for GitHub's Mermaid renderer (plain text, no emojis)
 
 ## 🏗️ Architecture Overview
 
