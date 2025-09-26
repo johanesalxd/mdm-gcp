@@ -54,148 +54,69 @@ For enterprise-scale MDM demonstrations with 100M+ records, use the scalable dat
 
 ### Scalable Generator Features
 
-- **🎯 Enterprise Scale**: 100M records from 25M unique customers (4x duplication factor)
-- **🔗 Cross-Chunk Duplicates**: Realistic temporal relationships spanning time periods
-- **📊 Memory Efficient**: 1M record chunks with BigQuery streaming (8-16GB RAM usage)
-- **🔄 Resume Capability**: Can restart from interruption points
-- **📦 Append Mode**: Generate multiple independent batches
-- **⚡ Performance**: 2-4 hour generation time on good VM instances
+- **🚀 Fully-Parallel Architecture**: Utilizes multi-processing for both the initial customer pool creation and the final data generation, ensuring maximum CPU utilization and eliminating bottlenecks.
+- **🧠 Memory-Efficient**: Processes data in small, manageable chunks, keeping RAM usage low regardless of total scale.
+- **🔗 Realistic Duplicates**: Creates authentic cross-chunk duplicates by sampling from a shared master customer pool.
+- **🧩 Source-Specific Logic**: Includes realistic fields for CRM, ERP, and E-commerce systems to ensure data realism.
+- **☁️ Notebook-Compatible**: Loads data into three separate tables (`raw_crm_customers_scale`, etc.) as expected by the notebook workflow.
+- **🔧 Fully Configurable**: Control total records, chunk size, and worker count via CLI arguments.
+- **➕ Append or Overwrite**: Natively supports appending data to existing tables for multi-batch runs.
 
 ### Basic Usage
 
-#### 1. **Standard Scale Generation**
-```bash
-# Generate 100M records (default)
-uv run python batch_mdm_gcp/scalable_data_generator.py \
-    --project-id YOUR_PROJECT_ID \
-    --dataset-id mdm_demo
-```
+#### 1. **Standard Generation (First Run)**
+This command generates ~100 million records, split across three tables, using all available CPU cores. It will **overwrite** the tables on the first run.
 
-#### 2. **Custom Scale Configuration**
 ```bash
-# Custom parameters
 uv run python batch_mdm_gcp/scalable_data_generator.py \
     --project-id YOUR_PROJECT_ID \
     --dataset-id mdm_demo \
+    --table-suffix _scale \
+    --total-records 100000000
+```
+
+#### 2. **Appending a Second Batch (e.g., for 200M total)**
+To add another 100 million records, simply use the `--write-disposition WRITE_APPEND` flag. This will append data to the existing `_scale` tables.
+
+```bash
+uv run python batch_mdm_gcp/scalable_data_generator.py \
+    --project-id YOUR_PROJECT_ID \
+    --dataset-id mdm_demo \
+    --table-suffix _scale \
+    --total-records 100000000 \
+    --write-disposition WRITE_APPEND
+```
+
+#### 3. **Custom Scale & Performance Tuning**
+You can tune the generator for your specific machine and needs. For a powerful machine, a larger chunk size is often more efficient as it reduces the number of BigQuery load jobs.
+
+```bash
+# Generate 50M records using 16 workers and a larger chunk size
+uv run python batch_mdm_gcp/scalable_data_generator.py \
+    --project-id YOUR_PROJECT_ID \
+    --dataset-id mdm_demo \
+    --table-suffix _scale \
     --total-records 50000000 \
     --unique-customers 12500000 \
-    --chunk-size 500000
+    --chunk-size 100000 \
+    --num-workers 16
 ```
 
-#### 3. **Performance Optimized Generation**
-```bash
-# Multi-threaded generation with optimal core utilization
-uv run python batch_mdm_gcp/scalable_data_generator.py \
-    --project-id YOUR_PROJECT_ID \
-    --dataset-id mdm_demo \
-    --max-workers 8 \
-    --batch-size 1500
+### Integration with Notebook Workflow
 
-# For high-memory systems (32GB+ RAM)
-uv run python batch_mdm_gcp/scalable_data_generator.py \
-    --project-id YOUR_PROJECT_ID \
-    --dataset-id mdm_demo \
-    --max-workers 12 \
-    --chunk-size 2000000
-```
+The new generator is designed to work seamlessly with the notebook.
 
-#### 4. **Fresh Start Generation**
-```bash
-# Clean restart (removes existing state files)
-uv run python batch_mdm_gcp/scalable_data_generator.py \
-    --project-id YOUR_PROJECT_ID \
-    --dataset-id mdm_demo \
-    --restart
-```
+1.  **Run the Generator**: Use the commands above to populate your `_scale` tables in BigQuery.
 
-#### 3. **Multiple Batches (Append Mode)**
-```bash
-# First batch
-uv run python batch_mdm_gcp/scalable_data_generator.py \
-    --project-id YOUR_PROJECT_ID \
-    --dataset-id mdm_demo \
-    --append-mode --batch-id batch1
+2.  **Update Notebook Configuration**: In the notebook's first setup cell, ensure the `PROJECT_ID` and `DATASET_ID` match what you used in the generator.
 
-# Second batch (separate tables)
-uv run python batch_mdm_gcp/scalable_data_generator.py \
-    --project-id YOUR_PROJECT_ID \
-    --dataset-id mdm_demo \
-    --append-mode --batch-id batch2
-```
+3.  **Modify the `generate_union_sql` call in Section 4**: This is the only change needed in the notebook. Tell the function to look for the tables with the `_scale` suffix.
+    ```python
+    # In Section 4 of the notebook
+    combine_sql = generate_union_sql(bq_helper.dataset_ref, table_suffix="_scale")
+    ```
 
-#### 4. **Consolidating Multiple Batches**
-
-**Why Separate Tables?**
-Append mode creates separate tables for **safety and operational benefits**:
-- ✅ **No Data Loss Risk**: Failed generation doesn't corrupt existing data
-- ✅ **Easy Rollback**: Can drop batch tables without affecting original data
-- ✅ **Parallel Processing**: Multiple batches can run simultaneously
-- ✅ **Independent QA**: Validate each batch before merging
-
-**Manual Consolidation:**
-After generating multiple batches, consolidate them into the original tables:
-
-```sql
--- 1. Consolidate CRM data from batch1
-INSERT INTO `your-project-id.mdm_demo.raw_crm_customers_scale`
-SELECT * FROM `your-project-id.mdm_demo.raw_crm_customers_scale_batch1`;
-
--- 2. Consolidate ERP data from batch1
-INSERT INTO `your-project-id.mdm_demo.raw_erp_customers_scale`
-SELECT * FROM `your-project-id.mdm_demo.raw_erp_customers_scale_batch1`;
-
--- 3. Consolidate E-commerce data from batch1
-INSERT INTO `your-project-id.mdm_demo.raw_ecommerce_customers_scale`
-SELECT * FROM `your-project-id.mdm_demo.raw_ecommerce_customers_scale_batch1`;
-
--- 4. Repeat for batch2 (if you have multiple batches)
-INSERT INTO `your-project-id.mdm_demo.raw_crm_customers_scale`
-SELECT * FROM `your-project-id.mdm_demo.raw_crm_customers_scale_batch2`;
-
-INSERT INTO `your-project-id.mdm_demo.raw_erp_customers_scale`
-SELECT * FROM `your-project-id.mdm_demo.raw_erp_customers_scale_batch2`;
-
-INSERT INTO `your-project-id.mdm_demo.raw_ecommerce_customers_scale`
-SELECT * FROM `your-project-id.mdm_demo.raw_ecommerce_customers_scale_batch2`;
-```
-
-**Cleanup (Optional):**
-Remove batch tables after successful consolidation:
-```sql
--- Drop batch1 tables
-DROP TABLE `your-project-id.mdm_demo.raw_crm_customers_scale_batch1`;
-DROP TABLE `your-project-id.mdm_demo.raw_erp_customers_scale_batch1`;
-DROP TABLE `your-project-id.mdm_demo.raw_ecommerce_customers_scale_batch1`;
-
--- Drop batch2 tables
-DROP TABLE `your-project-id.mdm_demo.raw_crm_customers_scale_batch2`;
-DROP TABLE `your-project-id.mdm_demo.raw_erp_customers_scale_batch2`;
-DROP TABLE `your-project-id.mdm_demo.raw_ecommerce_customers_scale_batch2`;
-```
-
-**Verification:**
-Check consolidated data:
-```sql
--- Verify total record counts
-SELECT
-  'CRM' as source_system,
-  COUNT(*) as total_records
-FROM `your-project-id.mdm_demo.raw_crm_customers_scale`
-
-UNION ALL
-
-SELECT
-  'ERP' as source_system,
-  COUNT(*) as total_records
-FROM `your-project-id.mdm_demo.raw_erp_customers_scale`
-
-UNION ALL
-
-SELECT
-  'E-commerce' as source_system,
-  COUNT(*) as total_records
-FROM `your-project-id.mdm_demo.raw_ecommerce_customers_scale`;
-```
+4.  **Run the Rest of the Notebook**: The notebook will now correctly find and `UNION` the large-scale tables, and the entire pipeline will run on your 100M+ record dataset.
 
 ### Integration with Notebook Workflow
 

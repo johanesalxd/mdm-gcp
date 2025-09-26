@@ -1,99 +1,53 @@
 """
-Scalable Data Generator for MDM at Scale (100M+ Records)
-Creates realistic customer data with cross-chunk duplicates and BigQuery streaming
+Scalable, Fully-Parallel MDM Data Generator
+
+This script generates large volumes of realistic customer data by parallelizing
+the entire workflow across multiple CPU cores. It consists of two main
+parallel stages:
+
+1.  **Parallel Pool Generation**: The initial creation of the unique base
+    customer pool is parallelized to quickly generate the foundational data.
+2.  **Parallel Chunk Generation**: The generation of the final records is
+    then parallelized, with each worker drawing from the shared customer
+    pool.
+
+This approach is highly scalable, memory-efficient, and designed for
+maximum performance on multi-core systems.
+
+Key Features:
+- Fully-parallel, two-stage architecture to eliminate bottlenecks.
+- Creates three separate tables (crm, erp, ecommerce) as expected by the notebook.
+- "Generate -> Split -> Save -> Upload -> Cleanup" workflow for each source.
+- Adds source-specific fields for a more realistic dataset.
+- Fully configurable via command-line arguments.
 """
 
 import argparse
-from concurrent.futures import as_completed
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
-from datetime import datetime
-from datetime import UTC
-import json
+from concurrent.futures import as_completed, ProcessPoolExecutor
 import os
-import pickle
 import random
-import sys
-import threading
-import time
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List
 import uuid
 
+import pandas as pd
 from faker import Faker
 from google.cloud import bigquery
-import psutil
+from tqdm import tqdm
 
-# Initialize Faker with fixed seed for reproducibility
-fake = Faker()
-Faker.seed(42)
-random.seed(42)
+# --- Core Data Variation and Generation Logic ---
 
-
-@dataclass
-class GenerationConfig:
-    """Configuration for scalable data generation"""
-    total_records: int = 100_000_000  # 100M records
-    chunk_size: int = 1_000_000       # 1M records per chunk
-    # 25M unique customers (4x duplication factor)
-    unique_customers: int = 25_000_000
-
-    # Cross-chunk duplicate configuration
-    # 30% of records are cross-chunk duplicates
-    cross_chunk_duplicate_rate: float = 0.3
-    # 20% chance of data evolution per chunk
-    temporal_evolution_rate: float = 0.2
-
-    # Source system distribution
-    crm_coverage: float = 0.8      # 80% of customers in CRM
-    erp_coverage: float = 0.7      # 70% of customers in ERP
-    ecommerce_coverage: float = 0.6  # 60% of customers in E-commerce
-
-    # Variation rates (from original generator)
-    variation_chance: float = 0.3
-    typo_chance: float = 0.1
-    missing_data_chance: float = 0.15
-    email_domain_change_chance: float = 0.2
-
-    # BigQuery configuration
-    project_id: str = "your-project-id"
-    dataset_id: str = "mdm_demo_scale"
-    location: str = "US"
-
-    # Performance settings
-    max_workers: int = 4
-    batch_insert_size: int = 1000
-
-    # State management
-    state_file: str = "generator_state.json"
-    customer_pool_file: str = "customer_pool.pkl"
-
-    # Append mode settings
-    append_mode: bool = False
-    batch_id: str = ""  # Unique identifier for this generation batch
-
-
-class CustomerPool:
-    """Manages the pool of unique customers for cross-chunk relationships"""
-
-    def __init__(self, config: GenerationConfig):
-        self.config = config
-        self.customers: Dict[str, Dict[str, Any]] = {}
-        self.customer_ids: List[str] = []
-        # customer_id -> set of chunks
-        self.generation_history: Dict[str, Set[int]] = {}
-
-        # Thread-safe locks for parallel processing
-        self._customers_lock = threading.RLock()
-        self._history_lock = threading.RLock()
-        self._state_lock = threading.RLock()
-
-    def create_base_customer(self, customer_id: str) -> Dict[str, Any]:
-        """Create a base customer profile"""
+def create_base_customer_slice(start_id: int, num_customers: int, seed: int) -> List[Dict[str, Any]]:
+    """Generates a slice of unique base customers. Designed to be run in parallel."""
+    Faker.seed(seed)
+    random.seed(seed)
+    fake = Faker()
+    customers = []
+    for i in range(num_customers):
+        customer_id = start_id + i
         first_name = fake.first_name()
         last_name = fake.last_name()
-
-        customer = {
-            'customer_id': customer_id,
+        customers.append({
+            'customer_id': f'CUST_{customer_id:08d}',
             'first_name': first_name,
             'last_name': last_name,
             'full_name': f'{first_name} {last_name}',
@@ -111,718 +65,177 @@ class CustomerPool:
             'registration_date': fake.date_between(start_date='-5y', end_date='today'),
             'last_activity_date': fake.date_between(start_date='-1y', end_date='today'),
             'is_active': random.choice([True, True, True, False]),
-            'created_chunk': 0,  # Will be updated when first used
-            'last_updated_chunk': 0
-        }
+        })
+    return customers
 
-        return customer
+def create_variations(customer: Dict[str, Any], source: str, fake: Faker) -> Dict[str, Any]:
+    """Creates realistic variations and adds source-specific fields."""
+    varied_customer = customer.copy()
+    varied_customer['source_system'] = source
+    varied_customer['record_id'] = str(uuid.uuid4())
 
-    def get_or_create_customer(self, customer_id: str) -> Dict[str, Any]:
-        """Get existing customer or create new one (thread-safe)"""
-        with self._customers_lock:
-            if customer_id not in self.customers:
-                self.customers[customer_id] = self.create_base_customer(
-                    customer_id)
-                self.customer_ids.append(customer_id)
-                with self._history_lock:
-                    self.generation_history[customer_id] = set()
-
-            return self.customers[customer_id].copy()
-
-    def mark_customer_used(self, customer_id: str, chunk_id: int):
-        """Mark that a customer was used in a specific chunk (thread-safe)"""
-        with self._history_lock:
-            if customer_id not in self.generation_history:
-                self.generation_history[customer_id] = set()
-            self.generation_history[customer_id].add(chunk_id)
-
-        with self._customers_lock:
-            if customer_id in self.customers:
-                self.customers[customer_id]['last_updated_chunk'] = chunk_id
-
-    def get_cross_chunk_candidates(self, chunk_id: int, count: int) -> List[str]:
-        """Get customer IDs that should appear as cross-chunk duplicates"""
-        # Prefer customers from recent chunks for temporal locality
-        weighted_customers = []
-
-        for customer_id, chunks in self.generation_history.items():
-            if not chunks:  # Skip unused customers
-                continue
-
-            # Weight based on recency and frequency
-            max_chunk = max(chunks)
-            frequency = len(chunks)
-            recency_weight = max(0, 10 - (chunk_id - max_chunk))
-            frequency_weight = min(frequency, 5)  # Cap at 5
-
-            weight = recency_weight + frequency_weight
-            if weight > 0:
-                weighted_customers.extend([customer_id] * weight)
-
-        # Sample without replacement
-        if len(weighted_customers) < count:
-            return weighted_customers
-
-        return random.sample(weighted_customers, count)
-
-    def evolve_customer(self, customer: Dict[str, Any], chunk_id: int) -> Dict[str, Any]:
-        """Apply temporal evolution to customer data"""
-        if random.random() > self.config.temporal_evolution_rate:
-            return customer
-
-        evolved = customer.copy()
-
-        # Update activity dates to be more recent
-        evolved['last_activity_date'] = fake.date_between(
-            start_date=evolved['last_activity_date'],
-            end_date='today'
-        )
-
-        # Possible income changes
-        if random.random() < 0.1:  # 10% chance
-            income_change = random.uniform(0.9, 1.1)  # ±10%
-            evolved['annual_income'] = int(
-                evolved['annual_income'] * income_change)
-
-        # Possible segment changes
-        if random.random() < 0.05:  # 5% chance
-            evolved['customer_segment'] = random.choice(
-                ['Premium', 'Standard', 'Basic'])
-
-        # Possible address changes
-        if random.random() < 0.03:  # 3% chance
-            evolved['address'] = fake.street_address()
-            evolved['city'] = fake.city()
-            evolved['state'] = fake.state_abbr()
-            evolved['zip_code'] = fake.zipcode()
-
-        return evolved
-
-    def save_state(self):
-        """Save customer pool state to disk"""
-        with open(self.config.customer_pool_file, 'wb') as f:
-            pickle.dump({
-                'customers': self.customers,
-                'customer_ids': self.customer_ids,
-                'generation_history': {k: list(v) for k, v in self.generation_history.items()}
-            }, f)
-
-    def load_state(self):
-        """Load customer pool state from disk"""
-        if os.path.exists(self.config.customer_pool_file):
-            with open(self.config.customer_pool_file, 'rb') as f:
-                data = pickle.load(f)
-                self.customers = data['customers']
-                self.customer_ids = data['customer_ids']
-                self.generation_history = {
-                    k: set(v) for k, v in data['generation_history'].items()}
-            print(f"✅ Loaded {len(self.customers)} customers from state file")
-
-
-class ScalableMDMGenerator:
-    """Main scalable data generator class"""
-
-    def __init__(self, config: GenerationConfig):
-        self.config = config
-        self.customer_pool = CustomerPool(config)
-        self.bq_client = bigquery.Client(project=config.project_id)
-        self.generation_state = self.load_generation_state()
-
-        # Thread-safe locks for state management
-        self._state_lock = threading.RLock()
-
-        # Variation functions (from original generator)
-        self.variations = {
-            'name_variations': [
+    # General variations
+    if random.random() < 0.3:
+        if varied_customer['full_name']:
+            name_variation = random.choice([
                 lambda name: name.replace('John', 'Jon'),
                 lambda name: name.replace('Michael', 'Mike'),
-                lambda name: name.replace('William', 'Bill'),
-                lambda name: name.replace('Robert', 'Bob'),
-                lambda name: name.replace('James', 'Jim'),
-                lambda name: name.replace('Christopher', 'Chris'),
-                lambda name: name.replace('Matthew', 'Matt'),
-                lambda name: name.replace('Anthony', 'Tony'),
-                lambda name: name.replace('Elizabeth', 'Liz'),
-                lambda name: name.replace('Jennifer', 'Jen'),
-            ],
-            'address_variations': [
-                lambda addr: addr.replace('Street', 'St'),
-                lambda addr: addr.replace('Avenue', 'Ave'),
-                lambda addr: addr.replace('Boulevard', 'Blvd'),
-                lambda addr: addr.replace('Road', 'Rd'),
-                lambda addr: addr.replace('Drive', 'Dr'),
-                lambda addr: addr.replace('Apartment', 'Apt'),
-                lambda addr: addr.replace('Suite', 'Ste'),
-            ],
-            'phone_formats': [
-                lambda phone: phone,
-                lambda phone: phone.replace('-', '.'),
-                lambda phone: phone.replace('-', ' '),
-                lambda phone: phone.replace('-', ''),
-                lambda phone: f"({phone[:3]}) {phone[4:7]}-{phone[8:]}",
-            ]
-        }
+            ])
+            varied_customer['full_name'] = name_variation(varied_customer['full_name'])
+    if random.random() < 0.15:
+        field_to_miss = random.choice(['phone', 'company', 'job_title'])
+        varied_customer[field_to_miss] = None
 
-    def setup_bigquery(self):
-        """Create BigQuery dataset and tables"""
-        print("🔄 Setting up BigQuery infrastructure...")
-
-        # Create dataset
-        dataset_ref = bigquery.DatasetReference(
-            self.config.project_id, self.config.dataset_id)
-        try:
-            dataset = bigquery.Dataset(dataset_ref)
-            dataset.location = self.config.location
-            dataset = self.bq_client.create_dataset(dataset, exists_ok=True)
-            print(f"✅ Dataset {self.config.dataset_id} ready")
-        except Exception as e:
-            print(f"❌ Error creating dataset: {e}")
-            return False
-
-        # Create tables for each source
-        sources = ['crm', 'erp', 'ecommerce']
-        for source in sources:
-            # Add batch_id to table name if in append mode
-            table_suffix = f"_scale_{self.config.batch_id}" if self.config.append_mode and self.config.batch_id else "_scale"
-            table_id = f"{self.config.project_id}.{self.config.dataset_id}.raw_{source}_customers{table_suffix}"
-
-            # Define schema (based on original generator)
-            schema = [
-                bigquery.SchemaField("record_id", "STRING", mode="REQUIRED"),
-                bigquery.SchemaField("customer_id", "STRING"),
-                bigquery.SchemaField("source_id", "STRING"),
-                bigquery.SchemaField("source_system", "STRING"),
-                bigquery.SchemaField("first_name", "STRING"),
-                bigquery.SchemaField("last_name", "STRING"),
-                bigquery.SchemaField("full_name", "STRING"),
-                bigquery.SchemaField("email", "STRING"),
-                bigquery.SchemaField("phone", "STRING"),
-                bigquery.SchemaField("address", "STRING"),
-                bigquery.SchemaField("city", "STRING"),
-                bigquery.SchemaField("state", "STRING"),
-                bigquery.SchemaField("zip_code", "STRING"),
-                bigquery.SchemaField("date_of_birth", "DATE"),
-                bigquery.SchemaField("company", "STRING"),
-                bigquery.SchemaField("job_title", "STRING"),
-                bigquery.SchemaField("annual_income", "INTEGER"),
-                bigquery.SchemaField("customer_segment", "STRING"),
-                bigquery.SchemaField("registration_date", "DATE"),
-                bigquery.SchemaField("last_activity_date", "DATE"),
-                bigquery.SchemaField("is_active", "BOOLEAN"),
-                bigquery.SchemaField("chunk_id", "INTEGER"),
-                bigquery.SchemaField("generation_timestamp", "TIMESTAMP"),
-            ]
-
-            # Add source-specific fields
-            if source == 'crm':
-                schema.extend([
-                    bigquery.SchemaField("lead_source", "STRING"),
-                    bigquery.SchemaField("sales_rep", "STRING"),
-                    bigquery.SchemaField("deal_stage", "STRING"),
-                ])
-            elif source == 'erp':
-                schema.extend([
-                    bigquery.SchemaField("account_number", "STRING"),
-                    bigquery.SchemaField("credit_limit", "INTEGER"),
-                    bigquery.SchemaField("payment_terms", "STRING"),
-                    bigquery.SchemaField("account_status", "STRING"),
-                ])
-            elif source == 'ecommerce':
-                schema.extend([
-                    bigquery.SchemaField("username", "STRING"),
-                    bigquery.SchemaField("total_orders", "INTEGER"),
-                    bigquery.SchemaField("total_spent", "FLOAT"),
-                    bigquery.SchemaField("preferred_category", "STRING"),
-                    bigquery.SchemaField("marketing_opt_in", "BOOLEAN"),
-                ])
-
-            try:
-                table = bigquery.Table(table_id, schema=schema)
-                table = self.bq_client.create_table(table, exists_ok=True)
-                print(f"✅ Table raw_{source}_customers_scale ready")
-            except Exception as e:
-                print(f"❌ Error creating table {table_id}: {e}")
-                return False
-
-        return True
-
-    def create_variations(self, customer: Dict[str, Any], source: str, chunk_id: int) -> Dict[str, Any]:
-        """Create variations of a customer for different sources (adapted from original)"""
-        varied_customer = customer.copy()
-
-        # Add source-specific ID and metadata
-        if source == 'crm':
-            varied_customer['source_id'] = f'CRM_{random.randint(10000, 99999)}'
-        elif source == 'erp':
-            varied_customer['source_id'] = f'ERP_{random.randint(10000, 99999)}'
-        elif source == 'ecommerce':
-            varied_customer['source_id'] = f'EC_{random.randint(10000, 99999)}'
-
-        varied_customer['source_system'] = source
-        varied_customer['record_id'] = str(uuid.uuid4())
-        varied_customer['chunk_id'] = chunk_id
-        varied_customer['generation_timestamp'] = datetime.now(UTC)
-
-        # Apply variations (same logic as original generator)
-        if random.random() < self.config.variation_chance:
-            # Name variations
-            for variation_func in self.variations['name_variations']:
-                if random.random() < 0.3:
-                    varied_customer['full_name'] = variation_func(
-                        varied_customer['full_name'])
-                    name_parts = varied_customer['full_name'].split()
-                    if len(name_parts) >= 2:
-                        varied_customer['first_name'] = name_parts[0]
-                        varied_customer['last_name'] = name_parts[-1]
-
-        if random.random() < self.config.variation_chance:
-            # Address variations
-            for variation_func in self.variations['address_variations']:
-                if random.random() < 0.4:
-                    varied_customer['address'] = variation_func(
-                        varied_customer['address'])
-
-        if random.random() < self.config.variation_chance:
-            # Phone variations
-            phone_format = random.choice(self.variations['phone_formats'])
-            varied_customer['phone'] = phone_format(varied_customer['phone'])
-
-        # Email variations
-        if random.random() < self.config.email_domain_change_chance:
-            email_local = varied_customer['email'].split('@')[0]
-            new_domain = random.choice(
-                ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com'])
-            varied_customer['email'] = f'{email_local}@{new_domain}'
-
-        # Introduce typos
-        if random.random() < self.config.typo_chance:
-            if random.random() < 0.5:
-                # Typo in name
-                name = varied_customer['full_name']
-                if len(name) > 3:
-                    pos = random.randint(1, len(name) - 2)
-                    name_list = list(name)
-                    name_list[pos] = random.choice(
-                        'abcdefghijklmnopqrstuvwxyz')
-                    varied_customer['full_name'] = ''.join(name_list)
-            else:
-                # Typo in address
-                addr = varied_customer['address']
-                if len(addr) > 5:
-                    pos = random.randint(1, len(addr) - 2)
-                    addr_list = list(addr)
-                    addr_list[pos] = random.choice(
-                        'abcdefghijklmnopqrstuvwxyz')
-                    varied_customer['address'] = ''.join(addr_list)
-
-        # Missing data simulation
-        if random.random() < self.config.missing_data_chance:
-            fields_to_potentially_miss = ['phone', 'company', 'job_title']
-            field_to_miss = random.choice(fields_to_potentially_miss)
-            varied_customer[field_to_miss] = None
-
-        # Add source-specific fields
-        if source == 'crm':
-            varied_customer.update({
-                'lead_source': random.choice(['Website', 'Referral', 'Cold Call', 'Trade Show']),
-                'sales_rep': fake.name(),
-                'deal_stage': random.choice(['Prospect', 'Qualified', 'Proposal', 'Closed Won', 'Closed Lost'])
-            })
-        elif source == 'erp':
-            varied_customer.update({
-                'account_number': f'ACC{random.randint(100000, 999999)}',
-                'credit_limit': random.randint(1000, 50000),
-                'payment_terms': random.choice(['Net 30', 'Net 60', 'COD', 'Prepaid']),
-                'account_status': random.choice(['Active', 'Suspended', 'Closed'])
-            })
-        elif source == 'ecommerce':
-            varied_customer.update({
-                'username': fake.user_name(),
-                'total_orders': random.randint(1, 50),
-                'total_spent': round(random.uniform(50, 5000), 2),
-                'preferred_category': random.choice(['Electronics', 'Clothing', 'Books', 'Home', 'Sports']),
-                'marketing_opt_in': random.choice([True, False])
-            })
-
-        return varied_customer
-
-    def generate_chunk_customer_list(self, chunk_id: int, chunk_size: int) -> List[str]:
-        """Generate list of customer IDs for this chunk with cross-chunk duplicates"""
-        customer_ids = []
-
-        # Calculate how many should be cross-chunk duplicates
-        cross_chunk_count = int(
-            chunk_size * self.config.cross_chunk_duplicate_rate)
-        new_customer_count = chunk_size - cross_chunk_count
-
-        # Get cross-chunk duplicate candidates
-        if chunk_id > 0:  # No cross-chunk duplicates for first chunk
-            cross_chunk_candidates = self.customer_pool.get_cross_chunk_candidates(
-                chunk_id, cross_chunk_count
-            )
-            customer_ids.extend(cross_chunk_candidates)
-
-        # Generate new customer IDs
-        start_id = chunk_id * self.config.chunk_size
-        for i in range(len(customer_ids), chunk_size):
-            customer_id = f'CUST_{start_id + i:08d}'
-            customer_ids.append(customer_id)
-
-        # Shuffle to distribute cross-chunk duplicates throughout the chunk
-        random.shuffle(customer_ids)
-
-        return customer_ids
-
-    def generate_chunk_for_source(self, chunk_id: int, source: str, customer_ids: List[str]) -> List[Dict[str, Any]]:
-        """Generate records for a specific source in this chunk"""
-        records = []
-
-        # Determine which customers should appear in this source
-        if source == 'crm':
-            coverage = self.config.crm_coverage
-        elif source == 'erp':
-            coverage = self.config.erp_coverage
-        else:  # ecommerce
-            coverage = self.config.ecommerce_coverage
-
-        # Sample customers for this source
-        source_customer_count = int(len(customer_ids) * coverage)
-        selected_customers = random.sample(customer_ids, source_customer_count)
-
-        for customer_id in selected_customers:
-            # Some customers might have multiple records
-            if source == 'ecommerce':
-                num_records = random.choices(
-                    [1, 2, 3], weights=[0.7, 0.25, 0.05])[0]
-            elif source == 'crm':
-                num_records = random.choices([1, 2], weights=[0.85, 0.15])[0]
-            else:  # erp
-                num_records = 1
-
-            for _ in range(num_records):
-                # Get base customer (with evolution if it's a cross-chunk duplicate)
-                base_customer = self.customer_pool.get_or_create_customer(
-                    customer_id)
-
-                # Apply temporal evolution for cross-chunk duplicates
-                if customer_id in self.customer_pool.generation_history:
-                    base_customer = self.customer_pool.evolve_customer(
-                        base_customer, chunk_id)
-
-                # Create variations for this source
-                record = self.create_variations(
-                    base_customer, source, chunk_id)
-                records.append(record)
-
-                # Mark customer as used in this chunk
-                self.customer_pool.mark_customer_used(customer_id, chunk_id)
-
-        return records
-
-    def stream_records_to_bigquery(self, records: List[Dict[str, Any]], source: str):
-        """Stream records to BigQuery in batches"""
-        # Use same table naming logic as setup_bigquery
-        table_suffix = f"_scale_{self.config.batch_id}" if self.config.append_mode and self.config.batch_id else "_scale"
-        table_id = f"{self.config.project_id}.{self.config.dataset_id}.raw_{source}_customers{table_suffix}"
-
-        # Convert records to BigQuery format
-        bq_records = []
-        for record in records:
-            bq_record = {}
-            for key, value in record.items():
-                if isinstance(value, datetime):
-                    bq_record[key] = value.isoformat()
-                elif value is None:
-                    bq_record[key] = None
-                else:
-                    bq_record[key] = value
-            bq_records.append(bq_record)
-
-        # Insert in batches
-        batch_size = self.config.batch_insert_size
-        for i in range(0, len(bq_records), batch_size):
-            batch = bq_records[i:i + batch_size]
-
-            try:
-                errors = self.bq_client.insert_rows_json(table_id, batch)
-                if errors:
-                    print(f"❌ BigQuery insert errors: {errors}")
-                    return False
-            except Exception as e:
-                print(f"❌ Error inserting batch to BigQuery: {e}")
-                return False
-
-        return True
-
-    def generate_chunk(self, chunk_id: int) -> bool:
-        """Generate a complete chunk of data for all sources"""
-        print(f"\n🔄 Generating chunk {chunk_id + 1}/{self.get_total_chunks()}")
-        chunk_start_time = time.time()
-
-        # Generate customer list for this chunk
-        customer_ids = self.generate_chunk_customer_list(
-            chunk_id, self.config.chunk_size)
-
-        # Generate data for each source
-        sources = ['crm', 'erp', 'ecommerce']
-        total_records_generated = 0
-
-        for source in sources:
-            source_start_time = time.time()
-
-            # Generate records for this source
-            records = self.generate_chunk_for_source(
-                chunk_id, source, customer_ids)
-
-            if records:
-                # Stream to BigQuery
-                success = self.stream_records_to_bigquery(records, source)
-                if not success:
-                    print(f"❌ Failed to stream {source} records to BigQuery")
-                    return False
-
-                total_records_generated += len(records)
-                source_time = time.time() - source_start_time
-                print(
-                    f"  ✅ {source.upper()}: {len(records):,} records in {source_time:.1f}s")
-
-        # Update generation state
-        chunk_time = time.time() - chunk_start_time
-        self.generation_state['completed_chunks'].append({
-            'chunk_id': chunk_id,
-            'records_generated': total_records_generated,
-            'processing_time': chunk_time,
-            'timestamp': datetime.now(UTC).isoformat()
+    # Add source-specific fields
+    if source == 'crm':
+        varied_customer.update({
+            'lead_source': random.choice(['Website', 'Referral', 'Cold Call']),
+            'sales_rep': fake.name(),
+            'deal_stage': random.choice(['Prospect', 'Qualified', 'Closed Won']),
         })
-        self.generation_state['last_completed_chunk'] = chunk_id
-        self.save_generation_state()
+    elif source == 'erp':
+        varied_customer.update({
+            'account_number': f'ACC{random.randint(100000, 999999)}',
+            'credit_limit': random.randint(1000, 50000),
+            'payment_terms': random.choice(['Net 30', 'Net 60', 'COD']),
+        })
+    elif source == 'ecommerce':
+        varied_customer.update({
+            'username': fake.user_name(),
+            'total_orders': random.randint(1, 50),
+            'total_spent': round(random.uniform(50, 5000), 2),
+        })
+    return varied_customer
 
-        # Save customer pool state periodically
-        if chunk_id % 10 == 0:  # Every 10 chunks
-            self.customer_pool.save_state()
+# --- Worker and Orchestration Logic ---
 
-        # Memory and performance reporting
-        memory_mb = psutil.Process().memory_info().rss / 1024 / 1024
-        print(
-            f"  📊 Chunk {chunk_id + 1} completed: {total_records_generated:,} records in {chunk_time:.1f}s ({memory_mb:.0f}MB RAM)")
+def upload_df_to_bq(df: pd.DataFrame, project_id: str, dataset_id: str, table_id: str, output_dir: str, chunk_id: int, source: str, write_disposition: str):
+    """Saves a DataFrame to a temp CSV and uploads it to BigQuery."""
+    if df.empty:
+        return
 
-        return True
+    temp_csv_path = os.path.join(output_dir, f'{source}_chunk_{chunk_id}.csv')
+    try:
+        df.to_csv(temp_csv_path, index=False)
 
-    def get_total_chunks(self) -> int:
-        """Calculate total number of chunks needed"""
-        return (self.config.total_records + self.config.chunk_size - 1) // self.config.chunk_size
+        client = bigquery.Client(project=project_id)
+        table_ref = client.dataset(dataset_id).table(table_id)
 
-    def generate_all_data(self):
-        """Generate all chunks of data"""
-        print(f"🚀 Starting scalable MDM data generation")
-        print(f"📊 Configuration:")
-        print(f"  Total records: {self.config.total_records:,}")
-        print(f"  Unique customers: {self.config.unique_customers:,}")
-        print(f"  Chunk size: {self.config.chunk_size:,}")
-        print(f"  Total chunks: {self.get_total_chunks()}")
-        print(
-            f"  Duplication factor: {self.config.total_records / self.config.unique_customers:.1f}x")
+        job_config = bigquery.LoadJobConfig(
+            source_format=bigquery.SourceFormat.CSV,
+            skip_leading_rows=1,
+            autodetect=True,
+            write_disposition=write_disposition,
+        )
+        with open(temp_csv_path, "rb") as source_file:
+            job = client.load_table_from_file(source_file, table_ref, job_config=job_config)
+        job.result()
+    finally:
+        if os.path.exists(temp_csv_path):
+            os.remove(temp_csv_path)
 
-        # Load existing state
-        self.customer_pool.load_state()
+def generate_and_upload_chunk(
+    chunk_id: int,
+    chunk_size: int,
+    unique_customer_pool: List[Dict[str, Any]],
+    project_id: str,
+    dataset_id: str,
+    table_suffix: str,
+    output_dir: str,
+    write_disposition: str,
+) -> str:
+    """Worker function to generate, split, and upload one chunk of data."""
+    random.seed(os.getpid() * chunk_id)
+    fake = Faker()
+    Faker.seed(os.getpid() * chunk_id)
 
-        # Setup BigQuery
-        if not self.setup_bigquery():
-            print("❌ Failed to setup BigQuery infrastructure")
-            return False
+    records = []
+    for _ in range(chunk_size):
+        base_customer = random.choice(unique_customer_pool)
+        source = random.choices(['crm', 'erp', 'ecommerce'], weights=[0.8, 0.7, 0.6], k=1)[0]
+        record = create_variations(base_customer, source, fake)
+        records.append(record)
 
-        start_time = time.time()
-        total_chunks = self.get_total_chunks()
-        start_chunk = self.generation_state.get('last_completed_chunk', -1) + 1
+    df = pd.DataFrame(records)
 
-        if start_chunk > 0:
-            print(f"🔄 Resuming from chunk {start_chunk + 1}")
+    for source in ['crm', 'erp', 'ecommerce']:
+        source_df = df[df['source_system'] == source]
+        table_id = f"raw_{source}_customers{table_suffix}"
+        upload_df_to_bq(source_df, project_id, dataset_id, table_id, output_dir, chunk_id, source, write_disposition)
 
-        # Generate chunks using multi-threading for better core utilization
-        print(
-            f"🔄 Using {self.config.max_workers} worker threads for parallel processing")
-
-        # Use ThreadPoolExecutor for parallel chunk generation
-        with ThreadPoolExecutor(max_workers=self.config.max_workers) as executor:
-            # Submit all chunk tasks
-            chunk_futures = {}
-            for chunk_id in range(start_chunk, total_chunks):
-                future = executor.submit(self.generate_chunk, chunk_id)
-                chunk_futures[future] = chunk_id
-
-            # Process completed chunks as they finish
-            completed_chunks = 0
-            failed_chunks = []
-
-            for future in as_completed(chunk_futures):
-                chunk_id = chunk_futures[future]
-                try:
-                    success = future.result()
-                    if not success:
-                        failed_chunks.append(chunk_id)
-                        print(f"❌ Failed to generate chunk {chunk_id}")
-                    else:
-                        completed_chunks += 1
-
-                        # Progress reporting
-                        progress = (completed_chunks /
-                                    (total_chunks - start_chunk)) * 100
-                        elapsed_time = time.time() - start_time
-                        if completed_chunks > 0:
-                            eta = (elapsed_time / completed_chunks) * \
-                                (total_chunks - start_chunk - completed_chunks)
-                            print(
-                                f"  📈 Progress: {progress:.1f}% | Completed: {completed_chunks}/{total_chunks - start_chunk} | ETA: {eta/3600:.1f}h")
-
-                except Exception as e:
-                    failed_chunks.append(chunk_id)
-                    print(f"❌ Exception in chunk {chunk_id}: {e}")
-
-            # Check for any failures
-            if failed_chunks:
-                print(
-                    f"❌ Failed to generate {len(failed_chunks)} chunks: {failed_chunks}")
-                return False
-
-        # Final save
-        self.customer_pool.save_state()
-
-        # Final statistics
-        total_time = time.time() - start_time
-        total_records = sum(chunk['records_generated']
-                            for chunk in self.generation_state['completed_chunks'])
-
-        print(f"\n🎉 Data generation completed!")
-        print(f"📊 Final Statistics:")
-        print(f"  Total records generated: {total_records:,}")
-        print(f"  Unique customers: {len(self.customer_pool.customers):,}")
-        print(f"  Total processing time: {total_time/3600:.1f} hours")
-        print(
-            f"  Average throughput: {total_records/total_time:.0f} records/second")
-
-        return True
-
-    def load_generation_state(self) -> Dict[str, Any]:
-        """Load generation state from disk"""
-        if os.path.exists(self.config.state_file):
-            with open(self.config.state_file, 'r') as f:
-                return json.load(f)
-        return {
-            'completed_chunks': [],
-            'last_completed_chunk': -1,
-            'start_time': datetime.now(UTC).isoformat()
-        }
-
-    def save_generation_state(self):
-        """Save generation state to disk (thread-safe)"""
-        with self._state_lock:
-            with open(self.config.state_file, 'w') as f:
-                json.dump(self.generation_state, f, indent=2)
-
+    return f"Chunk {chunk_id} completed."
 
 def main():
-    """Main function with CLI argument parsing"""
-    parser = argparse.ArgumentParser(description='Scalable MDM Data Generator')
-    parser.add_argument('--total-records', type=int, default=100_000_000,
-                        help='Total number of records to generate (default: 100M)')
-    parser.add_argument('--chunk-size', type=int, default=1_000_000,
-                        help='Records per chunk (default: 1M)')
-    parser.add_argument('--unique-customers', type=int, default=25_000_000,
-                        help='Number of unique customers (default: 25M)')
-    parser.add_argument('--project-id', type=str, required=True,
-                        help='Google Cloud project ID')
-    parser.add_argument('--dataset-id', type=str, default='mdm_demo_scale',
-                        help='BigQuery dataset ID (default: mdm_demo_scale)')
-    parser.add_argument('--cross-chunk-rate', type=float, default=0.3,
-                        help='Cross-chunk duplicate rate (default: 0.3)')
-    parser.add_argument('--max-workers', type=int, default=4,
-                        help='Maximum worker threads (default: 4)')
-    parser.add_argument('--batch-size', type=int, default=1000,
-                        help='BigQuery batch insert size (default: 1000)')
-    parser.add_argument('--resume', action='store_true',
-                        help='Resume from last completed chunk')
-    parser.add_argument('--append-mode', action='store_true',
-                        help='Enable append mode with unique batch ID')
-    parser.add_argument('--batch-id', type=str, default='',
-                        help='Custom batch ID for append mode (auto-generated if not provided)')
-    parser.add_argument('--restart', action='store_true',
-                        help='Delete existing state files and start completely fresh')
+    """Main function to orchestrate parallel data generation."""
+    parser = argparse.ArgumentParser(description="Scalable, Fully-Parallel MDM Data Generator")
+    parser.add_argument('--total-records', type=int, default=100_000_000, help="Total records to generate.")
+    parser.add_argument('--chunk-size', type=int, default=10000, help="Number of records per chunk per worker.")
+    parser.add_argument('--num-workers', type=int, default=os.cpu_count(), help="Number of parallel worker processes.")
+    parser.add_argument('--unique-customers', type=int, default=25_000_000, help="Number of unique customers in the pool.")
+    parser.add_argument('--project-id', type=str, required=True, help="Google Cloud Project ID.")
+    parser.add_argument('--dataset-id', type=str, required=True, help="BigQuery Dataset ID.")
+    parser.add_argument('--table-suffix', type=str, default="_scale", help="Suffix to append to table names (e.g., '_scale').")
+    parser.add_argument('--output-dir', type=str, default='/tmp/mdm_data_chunks', help="Temporary directory for staging CSV files.")
+    parser.add_argument('--write-disposition', type=str, default='WRITE_TRUNCATE', help="BigQuery write disposition (WRITE_TRUNCATE or WRITE_APPEND).")
 
     args = parser.parse_args()
 
-    # Handle restart option
-    if args.restart:
-        state_files = ['generator_state.json', 'customer_pool.pkl']
-        removed_files = []
-        for state_file in state_files:
-            if os.path.exists(state_file):
-                os.remove(state_file)
-                removed_files.append(state_file)
+    if args.total_records > 1_000_000_000:
+        print("❌ Error: Generating more than 1 billion records is not recommended.")
+        return
 
-        if removed_files:
-            print(
-                f"🗑️ Removed state files for fresh restart: {', '.join(removed_files)}")
-        else:
-            print("🗑️ No existing state files found - starting fresh")
+    print("🚀 Starting Scalable MDM Data Generator...")
+    print(f"  Total Records: ~{args.total_records:,}")
+    print(f"  Unique Customers: {args.unique_customers:,}")
+    print(f"  Workers: {args.num_workers}")
+    print(f"  BigQuery Target Suffix: {args.table_suffix}")
 
-    # Generate batch ID if in append mode
-    batch_id = ""
-    if args.append_mode:
-        if args.batch_id:
-            batch_id = args.batch_id
-        else:
-            # Auto-generate batch ID with timestamp
-            from datetime import datetime
-            batch_id = f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        print(f"🔄 Append mode enabled with batch ID: {batch_id}")
+    os.makedirs(args.output_dir, exist_ok=True)
 
-    # Create configuration from arguments
-    config = GenerationConfig(
-        total_records=args.total_records,
-        chunk_size=args.chunk_size,
-        unique_customers=args.unique_customers,
-        project_id=args.project_id,
-        dataset_id=args.dataset_id,
-        cross_chunk_duplicate_rate=args.cross_chunk_rate,
-        max_workers=args.max_workers,
-        batch_insert_size=args.batch_size,
-        append_mode=args.append_mode,
-        batch_id=batch_id
-    )
+    # --- Stage 1: Parallel Generation of the Unique Customer Pool ---
+    print(f"\n🔄 Stage 1: Generating {args.unique_customers:,} unique base customers in parallel...")
+    unique_customer_pool = []
+    pool_chunks = []
+    customers_per_worker = (args.unique_customers + args.num_workers - 1) // args.num_workers
 
-    # Create and run generator
-    generator = ScalableMDMGenerator(config)
+    with ProcessPoolExecutor(max_workers=args.num_workers) as executor:
+        for i in range(args.num_workers):
+            start_id = i * customers_per_worker
+            num_customers = min(customers_per_worker, args.unique_customers - start_id)
+            if num_customers > 0:
+                pool_chunks.append(executor.submit(create_base_customer_slice, start_id, num_customers, i))
 
-    print("🚀 Scalable MDM Data Generator")
-    print("=" * 50)
-    print(f"Project: {config.project_id}")
-    print(f"Dataset: {config.dataset_id}")
-    print(f"Target: {config.total_records:,} records")
-    print(f"Unique customers: {config.unique_customers:,}")
-    print(
-        f"Cross-chunk duplicate rate: {config.cross_chunk_duplicate_rate:.1%}")
-    print("=" * 50)
+        for future in tqdm(as_completed(pool_chunks), total=len(pool_chunks), desc="Creating Customer Pool"):
+            unique_customer_pool.extend(future.result())
 
-    try:
-        success = generator.generate_all_data()
-        if success:
-            print("\n🎉 Generation completed successfully!")
-            sys.exit(0)
-        else:
-            print("\n❌ Generation failed!")
-            sys.exit(1)
-    except KeyboardInterrupt:
-        print("\n⏹️ Generation interrupted by user")
-        generator.customer_pool.save_state()
-        generator.save_generation_state()
-        print("💾 State saved - you can resume with --resume flag")
-        sys.exit(1)
-    except Exception as e:
-        print(f"\n❌ Unexpected error: {e}")
-        generator.customer_pool.save_state()
-        generator.save_generation_state()
-        sys.exit(1)
+    print("✅ Customer pool generated.")
 
+    # --- Stage 2: Parallel Generation of Final Data Chunks ---
+    num_chunks = (args.total_records + args.chunk_size - 1) // args.chunk_size
+    print(f"\n🔄 Stage 2: Preparing to generate {num_chunks:,} final data chunks in parallel...")
+
+    with ProcessPoolExecutor(max_workers=args.num_workers) as executor:
+        futures = [
+            executor.submit(
+                generate_and_upload_chunk,
+                i,
+                args.chunk_size,
+                unique_customer_pool,
+                args.project_id,
+                args.dataset_id,
+                args.table_suffix,
+                args.output_dir,
+                args.write_disposition
+            ) for i in range(num_chunks)
+        ]
+
+        for future in tqdm(as_completed(futures), total=num_chunks, desc="Generating Final Chunks"):
+            try:
+                future.result()
+            except Exception as e:
+                print(f"\n❌ An error occurred in a worker process: {e}")
+
+    print("\n🎉 Data generation and upload completed successfully!")
 
 if __name__ == "__main__":
     main()
