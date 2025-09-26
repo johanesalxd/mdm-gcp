@@ -87,11 +87,11 @@ graph TD
     end
 
     Sources --> ETL_TOOL
-    ETL_TOOL --> DB
-    DB --> DQ_TOOL
-    DQ_TOOL --> DB
-    DB --> MATCH_ENGINE
-    MATCH_ENGINE --> DB
+    ETL_TOOL -- "Load" --> DB
+    DB -- "Extract for Cleansing" --> DQ_TOOL
+    DQ_TOOL -- "Load Cleansed Data" --> DB
+    DB -- "Extract for Matching" --> MATCH_ENGINE
+    MATCH_ENGINE -- "Write Match Results" --> DB
 
     classDef silo fill:#ffebee,stroke:#c62828,stroke-width:2px
     class ETL_TOOL,DB,DQ_TOOL,MATCH_ENGINE silo
@@ -120,7 +120,7 @@ graph TD
         BQ_GOLDEN["Golden Record Creation - generate_golden_record_sql() - Replaces: Survivorship Rule Engine"]
     end
 
-    Sources --> BQ_STORAGE
+    Sources -- "Load via ELT" --> BQ_STORAGE
     BQ_STORAGE --> BQ_ETL
     BQ_ETL --> BQ_MATCH
     BQ_MATCH --> BQ_GOLDEN
@@ -257,17 +257,11 @@ flowchart TD
 
     A --> B
     B --> C
-    C --> C1
-    C --> C2
-    C --> C3
-    C --> C4
-    C1 --> D
-    C2 --> D
-    C3 --> D
-    C4 --> D
+    C --> C1 & C2 & C3 & C4
+    C1 & C2 & C3 & C4 --> D
     D --> E
-    E -->|Score < 0.8 CREATE_NEW| F_NEW
-    E -->|Score >= 0.8 AUTO_MERGE| F_MERGE
+    E -- "Score < 0.8<br/>(CREATE_NEW)" --> F_NEW
+    E -- "Score ≥ 0.8<br/>(AUTO_MERGE)" --> F_MERGE
     F_NEW --> G_NEW
     F_MERGE --> G_MERGE
     G_NEW --> I_NEW
