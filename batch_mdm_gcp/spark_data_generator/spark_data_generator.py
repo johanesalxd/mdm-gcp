@@ -6,12 +6,14 @@ Preserves all sophisticated data generation logic from the original implementati
 while solving multiprocessing limitations through distributed computing.
 
 Usage:
-    spark-submit \
-        --packages com.google.cloud.spark:spark-bigquery-with-dependencies_2.12:0.32.2 \
-        spark_data_generator.py \
+    # Use the submit_job.sh script (recommended)
+    ./submit_job.sh --project-id YOUR_PROJECT_ID --total-records 100000000
+
+    # Or submit directly (not recommended - use submit_job.sh instead)
+    gcloud dataproc batches submit pyspark spark_data_generator.py \
         --project-id YOUR_PROJECT_ID \
-        --dataset-id mdm_demo \
-        --total-records 100000000
+        --py-files dependencies.zip \
+        -- --project-id YOUR_PROJECT_ID --total-records 100000000
 """
 
 import argparse
@@ -33,7 +35,6 @@ def create_spark_session(app_name: str = "MDM-Data-Generator") -> SparkSession:
     """Create optimized Spark session for BigQuery integration."""
     return SparkSession.builder \
         .appName(app_name) \
-        .config("spark.jars.packages", "com.google.cloud.spark:spark-bigquery-with-dependencies_2.12:0.32.2") \
         .config("spark.sql.adaptive.enabled", "true") \
         .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \
         .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer") \
