@@ -55,7 +55,7 @@ For enterprise-scale MDM demonstrations with 100M+ records, use the scalable dat
 ### Scalable Generator Features
 
 - **🚀 Fully-Parallel Architecture**: Utilizes multi-processing for both the initial customer pool creation and the final data generation, ensuring maximum CPU utilization and eliminating bottlenecks.
-- **🧠 Memory-Efficient**: Processes data in small, manageable chunks, keeping RAM usage low regardless of total scale.
+- **🧠 Memory-Efficient**: Processes data in small, manageable chunks, keeping RAM usage low.
 - **🔗 Realistic Duplicates**: Creates authentic cross-chunk duplicates by sampling from a shared master customer pool.
 - **🧩 Source-Specific Logic**: Includes realistic fields for CRM, ERP, and E-commerce systems to ensure data realism.
 - **☁️ Notebook-Compatible**: Loads data into three separate tables (`raw_crm_customers_scale`, etc.) as expected by the notebook workflow.
@@ -76,7 +76,7 @@ uv run python batch_mdm_gcp/scalable_data_generator.py \
 ```
 
 #### 2. **Appending a Second Batch (e.g., for 200M total)**
-To add another 100 million records, simply use the `--write-disposition WRITE_APPEND` flag. This will append data to the existing `_scale` tables.
+To add another 100 million records, use the `--write-disposition WRITE_APPEND` flag. This will append data to the existing `_scale` tables.
 
 ```bash
 uv run python batch_mdm_gcp/scalable_data_generator.py \
@@ -175,86 +175,60 @@ The scalable generator creates these tables automatically:
 
 ### Performance Optimization
 
-The scalable generator now includes **multi-threading support** for significant performance improvements:
+The scalable generator uses **multi-processing** for significant performance improvements:
 
 #### **Multi-Core Utilization**
-- **Before**: Single-threaded chunk processing (1 core usage)
-- **After**: Parallel chunk generation utilizing all available CPU cores
+- **Parallel Processing**: Utilizes all available CPU cores for both customer pool generation and final data chunk creation
 - **Performance gain**: **4-16x faster** depending on system cores
+- **Memory-efficient**: Processes data in manageable chunks to keep RAM usage low
 
-#### **Optimal Configuration Guidelines**
-
-| System Type | Recommended Settings | Expected Performance |
-|-------------|---------------------|----------------------|
-| **4-core (8GB RAM)** | `--max-workers 4 --chunk-size 500000` | ~2-3 hours for 100M records |
-| **8-core (16GB RAM)** | `--max-workers 6 --chunk-size 1000000` | ~1-2 hours for 100M records |
-| **16-core (32GB+ RAM)** | `--max-workers 12 --chunk-size 2000000` | ~30-60 minutes for 100M records |
-
-#### **Performance Tuning Tips**
+#### **Available Command-Line Options**
 
 ```bash
-# Auto-detect optimal worker count (CPU cores - 2)
-CORES=$(python -c "import psutil; print(max(1, psutil.cpu_count() - 2))")
-uv run python batch_mdm_gcp/scalable_data_generator.py \
-    --project-id YOUR_PROJECT_ID \
-    --max-workers $CORES
-
-# High-throughput configuration for powerful systems
-uv run python batch_mdm_gcp/scalable_data_generator.py \
-    --project-id YOUR_PROJECT_ID \
-    --max-workers 16 \
-    --chunk-size 2000000 \
-    --batch-size 2000
+uv run python batch_mdm_gcp/scalable_data_generator.py --help
 ```
 
-#### **State Management & Recovery**
+**Key Parameters:**
+- `--total-records`: Total number of records to generate (default: 100M)
+- `--unique-customers`: Number of unique customers (default: 25M)
+- `--chunk-size`: Records per processing chunk (default: 10K)
+- `--num-workers`: Parallel worker processes (default: CPU count)
+- `--write-disposition`: WRITE_TRUNCATE or WRITE_APPEND
 
-The generator provides robust state management for long-running processes:
+#### **Performance Tuning**
 
-| Feature | Command | Use Case |
-|---------|---------|----------|
-| **Resume** | `--resume` | Continue from interruption point |
-| **Fresh Start** | `--restart` | Delete all state files and start clean |
-| **Progress Tracking** | Automatic | Real-time progress, ETA, memory usage |
+For optimal performance:
+
+```bash
+# Use larger chunks on powerful systems
+uv run python batch_mdm_gcp/scalable_data_generator.py \
+    --project-id YOUR_PROJECT_ID \
+    --chunk-size 100000 \
+    --num-workers 16
+
+# Reduce load on smaller systems
+uv run python batch_mdm_gcp/scalable_data_generator.py \
+    --project-id YOUR_PROJECT_ID \
+    --chunk-size 10000 \
+    --num-workers 4
+```
 
 ### Troubleshooting
 
 #### **Memory Issues**
-```bash
-# Reduce chunk size for lower memory usage
---chunk-size 500000  # 500K instead of 1M
-
-# Reduce concurrent workers if hitting memory limits
---max-workers 2
-```
+- Reduce `--chunk-size` to lower memory usage per worker
+- Reduce `--num-workers` if system becomes unresponsive
+- Ensure sufficient disk space in `/tmp` for temporary files
 
 #### **Performance Issues**
-```bash
-# Too many workers can cause contention - reduce worker count
---max-workers 4  # Instead of using all 16 cores
+- Too many workers can cause CPU contention - try reducing `--num-workers`
+- Large chunk sizes improve BigQuery loading efficiency but use more memory
+- Monitor system resources during generation
 
-# Increase BigQuery batch size for better throughput
---batch-size 1500  # Instead of default 1000
-```
-
-#### **Resume Interrupted Generation**
-```bash
-# Resume from last completed chunk
-uv run python batch_mdm_gcp/scalable_data_generator.py \
-    --project-id YOUR_PROJECT_ID \
-    --resume
-
-# Start completely fresh (removes state files)
-uv run python batch_mdm_gcp/scalable_data_generator.py \
-    --project-id YOUR_PROJECT_ID \
-    --restart
-```
-
-#### **BigQuery Quota Limits**
-- Monitor insert quotas in GCP Console
-- Consider BigQuery slots reservation for consistent performance
-- Use `--batch-size 500` to reduce insert batch sizes
-- Reduce `--max-workers` to decrease concurrent API calls
+#### **BigQuery Issues**
+- Check BigQuery quotas and limits in GCP Console
+- Verify dataset and table permissions
+- Ensure BigQuery API is enabled in your project
 
 ### Setup Steps
 

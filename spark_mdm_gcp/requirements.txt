@@ -1,0 +1,20 @@
+# PySpark MDM Data Generator Dependencies
+#
+# These dependencies are automatically installed in Dataproc Serverless
+# This file is for reference and local development only
+
+# Core PySpark dependencies (pre-installed in Dataproc)
+pyspark>=3.4.0
+
+# Data generation dependencies (available in Dataproc)
+faker>=19.0.0
+
+# Google Cloud dependencies (pre-installed in Dataproc)
+google-cloud-bigquery>=3.11.0
+google-cloud-storage>=2.10.0
+
+# Note: When running on Dataproc Serverless, these dependencies
+# are automatically available. No manual installation required.
+#
+# For local development/testing:
+# pip install -r requirements.txt
