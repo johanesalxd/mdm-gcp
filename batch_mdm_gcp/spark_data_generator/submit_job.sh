@@ -14,7 +14,7 @@ set -e
 PROJECT_ID=""
 DATASET_ID="mdm_demo"
 TABLE_SUFFIX="_scale"
-TOTAL_RECORDS=100000000
+TOTAL_RECORDS=1000000
 UNIQUE_CUSTOMERS=""  # Will be auto-calculated if not specified
 WRITE_MODE="overwrite"
 PARTITIONS=1000
