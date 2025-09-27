@@ -33,26 +33,37 @@ The PySpark solution provides:
    gcloud auth application-default login
    ```
 
-### Basic Usage
+### Zero-Setup Usage ✨
 
-#### 1. **Test Run (1M records)**
+The Spark MDM generator is **completely self-contained** - no manual dependency setup required!
+
+#### 1. **Test Run (1M records, 250K customers auto-calculated)**
 ```bash
 cd spark_mdm_gcp
 ./submit_job.sh --project-id YOUR_PROJECT_ID --total-records 1000000
 ```
+**Features**: Script exits immediately, auto-creates dependencies, validates configuration
 
-#### 2. **Standard Scale (100M records)**
+#### 2. **Standard Scale (100M records, 25M customers auto-calculated)**
 ```bash
 ./submit_job.sh --project-id YOUR_PROJECT_ID --total-records 100000000
 ```
 
-#### 3. **Enterprise Scale (1B records)**
+#### 3. **Enterprise Scale (1B records with custom settings)**
 ```bash
 ./submit_job.sh \
     --project-id YOUR_PROJECT_ID \
     --total-records 1000000000 \
     --partitions 5000
 ```
+
+### What Happens Automatically
+
+✅ **Dependencies**: Auto-created from `requirements.txt` if missing
+✅ **Configuration**: Smart defaults and validation (25% customer ratio)
+✅ **Immediate Return**: Script exits after submission (--async mode)
+✅ **Clean Schemas**: Separate optimized tables per source system
+✅ **Error Prevention**: Validates impossible ratios and configurations
 
 ## 📊 Generated Data Structure
 
@@ -91,11 +102,25 @@ Spark Driver → RDD Partitions → Parallel Customer Generation → Cached Data
 
 #### **Stage 2: Source-Specific Record Generation**
 ```
-Customer Pool → RDD Transformation → Source Records → BigQuery Tables
-      ↓               ↓                     ↓              ↓
-  Distributed    Apply Coverage       Add Variations    Direct Write
-  Processing     & Duplication       & Source Fields   (No temp files)
+Customer Pool → RDD Transformation → Source Records → Clean Schemas → BigQuery Tables
+      ↓               ↓                     ↓             ↓              ↓
+  Distributed    Apply Coverage       Add Variations  Separate      Direct Write
+  Processing     & Duplication       & Source Fields  Schemas      (3 tables)
 ```
+
+### Clean Schema Architecture ✨
+
+**Problem Solved**: Original unified schema caused BigQuery compatibility issues
+
+**Solution**: Separate optimized schemas per source system:
+
+| Source | Schema Fields | Benefits |
+|--------|--------------|----------|
+| **CRM** | Base + `lead_source`, `sales_rep`, `deal_stage` | ✅ Clean, no null padding |
+| **ERP** | Base + `account_number`, `credit_limit`, `payment_terms`, `account_status` | ✅ Source-specific only |
+| **E-commerce** | Base + `username`, `total_orders`, `total_spent`, `preferred_category`, `marketing_opt_in` | ✅ Optimal performance |
+
+**Result**: Zero BigQuery schema conflicts, faster writes, cleaner data structure
 
 ### Performance Advantages
 
@@ -114,10 +139,24 @@ Customer Pool → RDD Transformation → Source Records → BigQuery Tables
 --project-id PROJECT_ID          # Required: Your GCP project
 --dataset-id DATASET            # BigQuery dataset (default: mdm_demo)
 --total-records COUNT           # Total records to generate
---unique-customers COUNT        # Number of unique customers
+--unique-customers COUNT        # Number of unique customers (auto-calculated if omitted)
 --partitions COUNT              # Spark partitions for parallelism
 --write-mode overwrite|append   # Table write behavior
 ```
+
+### Smart Configuration Features ✨
+
+**Auto-Calculation**: When `--unique-customers` is omitted, the script automatically calculates:
+```bash
+unique_customers = total_records ÷ 4    # 25% ratio for realistic MDM scenarios
+```
+
+**Intelligent Validation**:
+- ✅ Prevents unique customers > total records (impossible scenario)
+- ⚠️  Warns when ratio > 50% (unrealistic for MDM)
+- 📊 Shows expected output volumes
+
+**Immediate Return**: Script exits after successful submission (--async mode)
 
 ### Performance Tuning
 ```bash
@@ -133,18 +172,46 @@ Customer Pool → RDD Transformation → Source Records → BigQuery Tables
 --service-account EMAIL       # Custom service account
 ```
 
+## 📦 Dependency Management
+
+### Requirements.txt Approach
+
+**Professional Standard**: Uses `requirements.txt` for scalable dependency management
+
+```txt
+# spark_mdm_gcp/requirements.txt
+faker==19.12.0
+# Add future dependencies here:
+# pandas==2.1.3
+# numpy==1.24.3
+```
+
+### Automatic Setup ✨
+
+**No Manual Steps Required**:
+- Script auto-detects missing `dependencies.zip`
+- Reads `requirements.txt` and installs packages
+- Creates and uploads dependency bundle
+- Zero configuration for end users
+
+**Benefits**:
+- ✅ **Version Control**: Pin exact dependency versions
+- ✅ **Scalability**: Easy to add new libraries
+- ✅ **Reproducibility**: Consistent builds across environments
+- ✅ **Professional**: Industry-standard Python practices
+
 ## 🔧 Configuration Examples
 
-### Small Development Dataset
+### Small Development Dataset (Auto-calculated customers)
 ```bash
 ./submit_job.sh \
     --project-id my-project \
     --total-records 100000 \
-    --unique-customers 25000 \
     --partitions 10
+# Auto-calculates: 25,000 unique customers (25% ratio)
 ```
 
-### Production Testing
+### Production Testing (Explicit customers)
 ```bash
 ./submit_job.sh \
     --project-id my-project \
@@ -152,6 +219,12 @@ Customer Pool → RDD Transformation → Source Records → BigQuery Tables
     --unique-customers 125000000 \
     --partitions 2500 \
     --write-mode overwrite
+```
+
+### Quick Test with Smart Defaults
+```bash
+./submit_job.sh --project-id my-project --total-records 1000000
+# Result: 1M records, 250K customers, immediate return, auto-dependencies
 ```
 
 ### Incremental Data Addition
@@ -200,22 +273,68 @@ gcloud dataproc batches describe BATCH_ID \
 gcloud dataproc batches cancel BATCH_ID --project=PROJECT_ID --region=us-central1
 ```
 
-### Common Issues
+### Common Issues & Solutions ✨
 
 #### **"Insufficient quota" errors**
+```bash
+ERROR: Insufficient 'CPUS' quota. Requested 12.0, available 0.0
+```
+**Solutions**:
 - Check Compute Engine quotas in GCP Console
 - Request quota increases for CPUs, IPs, or disks
 - Try a different region with available quota
+- Use fewer partitions: `--partitions 100`
 
-#### **BigQuery write failures**
-- Verify BigQuery API is enabled
-- Check dataset exists and has correct permissions
-- Ensure temporary GCS bucket exists
+#### **Configuration validation errors**
+```bash
+❌ Error: Unique customers (25000000) cannot exceed total records (1000000)
+```
+**Solutions**:
+- **Auto-fix**: Remove `--unique-customers` to use auto-calculation
+- **Manual fix**: Increase `--total-records` or decrease `--unique-customers`
+- **Smart defaults**: Let the script calculate realistic ratios
+
+#### **Dependency creation failures**
+```bash
+❌ Error: requirements.txt not found
+```
+**Solutions**:
+- File exists: Check current directory has `requirements.txt`
+- Missing file: Create with `echo "faker==19.12.0" > requirements.txt`
+- Path issues: Run script from `spark_mdm_gcp/` directory
+
+#### **BigQuery schema conflicts (SOLVED)**
+```bash
+BigQueryConnectorException$InvalidSchemaException: schema not compatible
+```
+**Status**: ✅ **Permanently Fixed** with clean schema architecture
+- No longer occurs with separate source schemas
+- Original unified schema approach eliminated
+
+#### **Job monitoring after --async**
+```bash
+# Job submitted but how to monitor?
+```
+**Solutions**:
+- **List jobs**: `gcloud dataproc batches list --project=PROJECT_ID --region=us-central1`
+- **Get status**: Use batch ID from submission output
+- **View logs**: Script provides monitoring commands after submission
+
+#### **Transient BigQuery write errors**
+```bash
+BigQueryConnectorException: Could not create write-stream after multiple retries
+```
+**Status**: ✅ **Normal behavior** - not a code issue
+- **Cause**: High concurrency (1000 partitions) hitting BigQuery rate limits
+- **Outcome**: Spark automatically retries failed tasks
+- **Action**: None required - job completes successfully
+- **Reduce frequency**: Use `--partitions 500` for fewer concurrent writes
 
 #### **Job timeout or slow performance**
 - Increase partition count for better parallelism
 - Check for data skew in customer distribution
 - Consider using fewer unique customers for testing
+- Monitor BigQuery quotas and slot usage
 
 ## 🔗 Integration with Notebook
 

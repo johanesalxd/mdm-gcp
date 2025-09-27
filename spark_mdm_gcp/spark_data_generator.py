@@ -314,9 +314,8 @@ def apply_data_variations(customer_data: Dict[str, Any], source: str, partition_
     return varied_customer
 
 
-def generate_source_records(partition_iter, source: str, coverage: float, duplication_weights: List[float]):
+def generate_source_records(partition_iter, source: str, coverage: float):
     """Generate records for a specific source with proper duplication logic."""
-    from itertools import chain
     import random
 
     # Get partition ID for seeding
@@ -426,7 +425,7 @@ def main():
         # Generate source-specific records
         source_rdd = customer_rdd.mapPartitions(
             lambda partition: generate_source_records(
-                partition, source, coverage, dup_weights)
+                partition, source, coverage)
         )
 
         # Select appropriate schema for this source (like batch versions!)

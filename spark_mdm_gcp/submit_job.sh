@@ -187,34 +187,41 @@ SCRIPT_GCS_PATH="gs://$TEMP_BUCKET/spark-mdm/spark_data_generator.py"
 echo "📤 Uploading PySpark script to $SCRIPT_GCS_PATH"
 gsutil cp spark_data_generator.py $SCRIPT_GCS_PATH
 
-# Upload the Python dependencies zip file to GCS
+# Auto-create dependencies if missing
 DEPENDENCIES_GCS_PATH="gs://$TEMP_BUCKET/spark-mdm/dependencies.zip"
 echo "📦 Uploading Python dependencies to $DEPENDENCIES_GCS_PATH"
 
-if [[ -f "dependencies.zip" ]]; then
-  gsutil cp dependencies.zip $DEPENDENCIES_GCS_PATH
-  echo "✓ Dependencies zip uploaded successfully"
-else
-  echo "❌ Error: dependencies.zip not found"
-  echo "Please run 'mkdir dependencies && pip3 install faker --target=dependencies/ && cd dependencies && zip -r ../dependencies.zip .' first"
-  exit 1
+if [[ ! -f "dependencies.zip" ]]; then
+  echo "📦 Creating Python dependencies from requirements.txt..."
+
+  if [[ ! -f "requirements.txt" ]]; then
+    echo "❌ Error: requirements.txt not found"
+    echo "Please create requirements.txt with your Python dependencies"
+    exit 1
+  fi
+
+  mkdir -p dependencies
+  pip3 install -r requirements.txt --target=dependencies/ --quiet
+  cd dependencies && zip -r ../dependencies.zip . --quiet
+  cd ..
+  echo "✓ Dependencies created successfully from requirements.txt"
 fi
+
+gsutil cp dependencies.zip $DEPENDENCIES_GCS_PATH
+echo "✓ Dependencies zip uploaded successfully"
 
 # Build the gcloud dataproc batches submit pyspark command
 BATCH_ID="mdm-data-gen-$(date +%Y%m%d-%H%M%S)"
 
 echo "📦 Using pre-built Python dependencies via --py-files..."
-echo "📦 Using latest BigQuery Spark connector..."
 
 GCLOUD_CMD="gcloud dataproc batches submit pyspark $SCRIPT_GCS_PATH \
   --batch=$BATCH_ID \
   --project=$PROJECT_ID \
   --region=$REGION \
   --py-files=$DEPENDENCIES_GCS_PATH \
-  --properties=spark.sql.adaptive.enabled=true,spark.sql.adaptive.coalescePartitions.enabled=true"
-
-echo "✓ Faker and dependencies will be loaded via --py-files"
-echo "✓ Using latest BigQuery connector for optimal performance"
+  --properties=spark.sql.adaptive.enabled=true,spark.sql.adaptive.coalescePartitions.enabled=true \
+  --async"
 
 # Add optional network configuration
 if [[ -n "$SUBNET" ]]; then
