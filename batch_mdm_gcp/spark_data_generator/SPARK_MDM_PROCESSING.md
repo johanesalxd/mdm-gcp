@@ -39,7 +39,7 @@ The Spark MDM generator is **completely self-contained** - no manual dependency 
 
 #### 1. **Test Run (1M records, 250K customers auto-calculated)**
 ```bash
-cd spark_mdm_gcp
+cd batch_mdm_gcp/spark_data_generator
 ./submit_job.sh --project-id YOUR_PROJECT_ID --total-records 1000000
 ```
 **Features**: Script exits immediately, auto-creates dependencies, validates configuration
@@ -179,7 +179,7 @@ unique_customers = total_records ÷ 4    # 25% ratio for realistic MDM scenarios
 **Professional Standard**: Uses `requirements.txt` for scalable dependency management
 
 ```txt
-# spark_mdm_gcp/requirements.txt
+# batch_mdm_gcp/spark_data_generator/requirements.txt
 faker==19.12.0
 # Add future dependencies here:
 # pandas==2.1.3
@@ -392,17 +392,17 @@ The PySpark generator creates tables compatible with the batch processing notebo
 ## 🔗 Related Resources
 
 ### **Batch Processing Documentation**
-- **[Original Batch Processing Guide](../batch_mdm_gcp/MDM_BATCH_PROCESSING.md)** - Multiprocessing implementation
-- **[Batch Processing Notebook](../batch_mdm_gcp/mdm_batch_processing.ipynb)** - Interactive MDM pipeline
-- **[Demo Results & Analysis](../batch_mdm_gcp/MDM_BATCH_RESULTS.md)** - Comprehensive results
+- **[Original Batch Processing Guide](../MDM_BATCH_PROCESSING.md)** - Multiprocessing implementation
+- **[Batch Processing Notebook](../mdm_batch_processing.ipynb)** - Interactive MDM pipeline
+- **[Demo Results & Analysis](../MDM_BATCH_RESULTS.md)** - Comprehensive results
 
 ### **Streaming Processing**
-- **[Streaming MDM Guide](../streaming_mdm_gcp/MDM_STREAMING_PROCESSING.md)** - Real-time processing
-- **[Streaming Notebook](../streaming_mdm_gcp/streaming_mdm_processing.ipynb)** - Interactive streaming
+- **[Streaming MDM Guide](../../streaming_mdm_gcp/MDM_STREAMING_PROCESSING.md)** - Real-time processing
+- **[Streaming Notebook](../../streaming_mdm_gcp/streaming_mdm_processing.ipynb)** - Interactive streaming
 
 ### **Architecture & Design**
-- **[Main Project README](../README.md)** - Overall MDM architecture
-- **[Unified Implementation](../mdm_unified_implementation.md)** - Cross-platform strategy
+- **[Main Project README](../../README.md)** - Overall MDM architecture
+- **[Unified Implementation](../../mdm_unified_implementation.md)** - Cross-platform strategy
 
 ### **External Documentation**
 - [Dataproc Serverless Documentation](https://cloud.google.com/dataproc-serverless)

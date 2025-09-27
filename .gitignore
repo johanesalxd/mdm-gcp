@@ -9,6 +9,5 @@ __pycache__/
 *$py.class
 
 # Dependency management
-*/dependencies/
-*/dependencies.zip
-requirements.txt
+**/dependencies/
+**/dependencies.zip

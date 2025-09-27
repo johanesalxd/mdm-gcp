@@ -52,15 +52,20 @@ For enterprise-scale MDM demonstrations with 100M+ records, use the scalable dat
 - ✅ Production workload simulation
 - ✅ Realistic data complexity with cross-temporal relationships
 
-### Scalable Generator Features
+### Scalable Generator Options
 
-- **🚀 Fully-Parallel Architecture**: Utilizes multi-processing for both the initial customer pool creation and the final data generation, ensuring maximum CPU utilization and eliminating bottlenecks.
-- **🧠 Memory-Efficient**: Processes data in small, manageable chunks, keeping RAM usage low.
-- **🔗 Realistic Duplicates**: Creates authentic cross-chunk duplicates by sampling from a shared master customer pool.
-- **🧩 Source-Specific Logic**: Includes realistic fields for CRM, ERP, and E-commerce systems to ensure data realism.
-- **☁️ Notebook-Compatible**: Loads data into three separate tables (`raw_crm_customers_scale`, etc.) as expected by the notebook workflow.
-- **🔧 Fully Configurable**: Control total records, chunk size, and worker count via CLI arguments.
-- **➕ Append or Overwrite**: Natively supports appending data to existing tables for multi-batch runs.
+**Option 1: Traditional Batch Generator (Multi-processing)**
+- **🚀 Fully-Parallel Architecture**: CPU-based parallelization
+- **🧠 Memory-Efficient**: Processes data in chunks
+- **Available in**: `batch_mdm_gcp/scalable_data_generator.py`
+
+**Option 2: Spark Generator (Distributed)**
+- **☁️ Serverless Scaling**: Auto-scaling via Dataproc Serverless
+- **🔧 Enterprise Scale**: Supports billions of records
+- **📦 Zero Setup**: Auto-dependency management
+- **Available in**: `batch_mdm_gcp/spark_data_generator/`
+
+Both generators are **notebook-compatible** and create the same table structure.
 
 ### Basic Usage
 
