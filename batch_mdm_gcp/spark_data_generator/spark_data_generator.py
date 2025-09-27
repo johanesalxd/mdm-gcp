@@ -439,10 +439,11 @@ def main():
         # Convert back to DataFrame with clean source-specific schema
         source_df = spark.createDataFrame(source_rdd, schema=schema)
 
-        # Write to BigQuery
+        # Write to BigQuery with repartitioning to avoid write stream concurrency issues
         table_name = f"raw_{source}_customers{args.table_suffix}"
 
-        source_df.write \
+        source_df.repartition(200) \
+            .write \
             .format("bigquery") \
             .option("table", f"{args.project_id}.{args.dataset_id}.{table_name}") \
             .option("writeMethod", "direct") \

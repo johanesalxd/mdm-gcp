@@ -39,41 +39,40 @@ The notebook generates **200+ realistic customer records** representing:
 
 For enterprise-scale MDM demonstrations with 100M+ records, use the scalable data generator instead of the notebook's built-in data generation.
 
-### When to Use Scalable Generator
+### When to Use Spark Generator
 
 **Use the notebook (Section 2) for:**
 - ✅ Quick demos and learning (120 unique customers, ~284 records)
 - ✅ Algorithm testing and development
 - ✅ Small-scale proof of concepts
 
-**Use the scalable generator for:**
+**Use the Spark generator for:**
 - ✅ Enterprise-scale demos (25M+ customers, 100M+ records)
 - ✅ Performance testing at scale
 - ✅ Production workload simulation
 - ✅ Realistic data complexity with cross-temporal relationships
 
-### Scalable Generator Options
+### Enterprise-Scale Data Generation
 
-**Option 1: Traditional Batch Generator (Multi-processing)**
-- **🚀 Fully-Parallel Architecture**: CPU-based parallelization
-- **🧠 Memory-Efficient**: Processes data in chunks
-- **Available in**: `batch_mdm_gcp/scalable_data_generator.py`
+For enterprise-scale MDM demonstrations with 100M+ records, use the **Spark Data Generator**:
 
-**Option 2: Spark Generator (Distributed)**
+**Spark Generator Features:**
 - **☁️ Serverless Scaling**: Auto-scaling via Dataproc Serverless
 - **🔧 Enterprise Scale**: Supports billions of records
 - **📦 Zero Setup**: Auto-dependency management
-- **Available in**: `batch_mdm_gcp/spark_data_generator/`
+- **🚀 Production Ready**: Built for enterprise workloads
+- **📊 Notebook Compatible**: Creates the same table structure as the notebook
 
-Both generators are **notebook-compatible** and create the same table structure.
+**Available in**: `batch_mdm_gcp/spark_data_generator/`
 
 ### Basic Usage
 
 #### 1. **Standard Generation (First Run)**
-This command generates ~100 million records, split across three tables, using all available CPU cores. It will **overwrite** the tables on the first run.
+This command generates ~100 million records using Dataproc Serverless. It will **overwrite** the tables on the first run.
 
 ```bash
-uv run python batch_mdm_gcp/scalable_data_generator.py \
+cd batch_mdm_gcp/spark_data_generator
+./submit_job.sh \
     --project-id YOUR_PROJECT_ID \
     --dataset-id mdm_demo \
     --table-suffix _scale \
@@ -81,66 +80,44 @@ uv run python batch_mdm_gcp/scalable_data_generator.py \
 ```
 
 #### 2. **Appending a Second Batch (e.g., for 200M total)**
-To add another 100 million records, use the `--write-disposition WRITE_APPEND` flag. This will append data to the existing `_scale` tables.
+To add another 100 million records, use the `--write-mode append` flag. This will append data to the existing `_scale` tables.
 
 ```bash
-uv run python batch_mdm_gcp/scalable_data_generator.py \
+cd batch_mdm_gcp/spark_data_generator
+./submit_job.sh \
     --project-id YOUR_PROJECT_ID \
     --dataset-id mdm_demo \
     --table-suffix _scale \
     --total-records 100000000 \
-    --write-disposition WRITE_APPEND
+    --write-mode append
 ```
 
 #### 3. **Custom Scale & Performance Tuning**
-You can tune the generator for your specific machine and needs. For a powerful machine, a larger chunk size is often more efficient as it reduces the number of BigQuery load jobs.
+You can tune the generator for massive scale by adjusting partition count and other parameters.
 
 ```bash
-# Generate 50M records using 16 workers and a larger chunk size
-uv run python batch_mdm_gcp/scalable_data_generator.py \
+cd batch_mdm_gcp/spark_data_generator
+# Generate 1B records with optimized partitioning
+./submit_job.sh \
     --project-id YOUR_PROJECT_ID \
     --dataset-id mdm_demo \
     --table-suffix _scale \
-    --total-records 50000000 \
-    --unique-customers 12500000 \
-    --chunk-size 100000 \
-    --num-workers 16
+    --total-records 1000000000 \
+    --partitions 5000
 ```
 
 ### Integration with Notebook Workflow
 
-The new generator is designed to work seamlessly with the notebook.
+After running the Spark generator, **skip to Section 4** of the notebook:
 
-1.  **Run the Generator**: Use the commands above to populate your `_scale` tables in BigQuery.
+#### **Steps to Integrate**
 
-2.  **Update Notebook Configuration**: In the notebook's first setup cell, ensure the `PROJECT_ID` and `DATASET_ID` match what you used in the generator.
-
-3.  **Modify the `generate_union_sql` call in Section 4**: This is the only change needed in the notebook. Tell the function to look for the tables with the `_scale` suffix.
-    ```python
-    # In Section 4 of the notebook
-    combine_sql = generate_union_sql(bq_helper.dataset_ref, table_suffix="_scale")
-    ```
-
-4.  **Run the Rest of the Notebook**: The notebook will now correctly find and `UNION` the large-scale tables, and the entire pipeline will run on your 100M+ record dataset.
-
-### Integration with Notebook Workflow
-
-After running the scalable generator, **skip to Section 4** of the notebook:
-
-#### **Option A: Align Generator with Notebook (Recommended)**
-
-1. **Run generator with notebook-compatible parameters:**
-   ```bash
-   uv run python batch_mdm_gcp/scalable_data_generator.py \
-       --project-id YOUR_PROJECT_ID \
-       --dataset-id mdm_demo \
-       --total-records 100000000
-   ```
+1. **Run the Spark generator** using the commands above to populate your `_scale` tables in BigQuery.
 
 2. **Update notebook configuration (Section 1):**
    ```python
    PROJECT_ID = "YOUR_PROJECT_ID"  # Your actual project ID
-   DATASET_ID = "mdm_demo"        # Matches generator
+   DATASET_ID = "mdm_demo"        # Matches generator default
    ```
 
 3. **Skip to Section 4** and update table references:
@@ -149,26 +126,11 @@ After running the scalable generator, **skip to Section 4** of the notebook:
    combine_sql = generate_union_sql(bq_helper.dataset_ref, table_suffix="_scale")
    ```
 
-#### **Option B: Use Generator Defaults**
-
-1. **Run generator with defaults:**
-   ```bash
-   uv run python batch_mdm_gcp/scalable_data_generator.py \
-       --project-id YOUR_PROJECT_ID \
-       --total-records 100000000
-   ```
-
-2. **Update notebook configuration:**
-   ```python
-   PROJECT_ID = "YOUR_PROJECT_ID"
-   DATASET_ID = "mdm_demo_scale"  # Matches generator default
-   ```
-
-3. **Skip to Section 4** (table names will match: `raw_*_customers_scale`)
+4. **Run the rest of the notebook**: The notebook will now correctly find and process your large-scale dataset.
 
 ### Generated Table Structure
 
-The scalable generator creates these tables automatically:
+The Spark generator creates these tables automatically:
 
 | Table Name | Description | Records (100M total) |
 |------------|-------------|---------------------|
@@ -178,57 +140,60 @@ The scalable generator creates these tables automatically:
 
 **Note**: Overlap between systems creates realistic multi-source scenarios.
 
-### Performance Optimization
+### Performance & Monitoring
 
-The scalable generator uses **multi-processing** for significant performance improvements:
+The Spark generator provides **automatic scaling** and monitoring capabilities:
 
-#### **Multi-Core Utilization**
-- **Parallel Processing**: Utilizes all available CPU cores for both customer pool generation and final data chunk creation
-- **Performance gain**: **4-16x faster** depending on system cores
-- **Memory-efficient**: Processes data in manageable chunks to keep RAM usage low
+#### **Serverless Advantages**
+- **Auto-scaling**: Dataproc Serverless automatically provisions resources
+- **Fault tolerance**: Automatic task retry and recovery
+- **Cost optimization**: Pay only for actual usage
+- **No infrastructure management**: Fully managed by Google Cloud
 
 #### **Available Command-Line Options**
 
 ```bash
-uv run python batch_mdm_gcp/scalable_data_generator.py --help
+cd batch_mdm_gcp/spark_data_generator
+./submit_job.sh --help
 ```
 
 **Key Parameters:**
 - `--total-records`: Total number of records to generate (default: 100M)
-- `--unique-customers`: Number of unique customers (default: 25M)
-- `--chunk-size`: Records per processing chunk (default: 10K)
-- `--num-workers`: Parallel worker processes (default: CPU count)
-- `--write-disposition`: WRITE_TRUNCATE or WRITE_APPEND
+- `--unique-customers`: Number of unique customers (auto-calculated if omitted)
+- `--partitions`: Spark partitions for parallelism (default: 1000)
+- `--write-mode`: overwrite or append (default: overwrite)
 
 #### **Performance Tuning**
 
 For optimal performance:
 
 ```bash
-# Use larger chunks on powerful systems
-uv run python batch_mdm_gcp/scalable_data_generator.py \
-    --project-id YOUR_PROJECT_ID \
-    --chunk-size 100000 \
-    --num-workers 16
+cd batch_mdm_gcp/spark_data_generator
 
-# Reduce load on smaller systems
-uv run python batch_mdm_gcp/scalable_data_generator.py \
+# Increase parallelism for large datasets
+./submit_job.sh \
     --project-id YOUR_PROJECT_ID \
-    --chunk-size 10000 \
-    --num-workers 4
+    --total-records 1000000000 \
+    --partitions 5000
+
+# Reduce partitions for smaller datasets
+./submit_job.sh \
+    --project-id YOUR_PROJECT_ID \
+    --total-records 10000000 \
+    --partitions 100
 ```
 
 ### Troubleshooting
 
-#### **Memory Issues**
-- Reduce `--chunk-size` to lower memory usage per worker
-- Reduce `--num-workers` if system becomes unresponsive
-- Ensure sufficient disk space in `/tmp` for temporary files
+#### **Quota Issues**
+- Check Compute Engine quotas in GCP Console
+- Request quota increases for CPUs, IPs, or disks
+- Try a different region with available quota
 
-#### **Performance Issues**
-- Too many workers can cause CPU contention - try reducing `--num-workers`
-- Large chunk sizes improve BigQuery loading efficiency but use more memory
-- Monitor system resources during generation
+#### **Job Monitoring**
+- Use `gcloud dataproc batches list` to see all jobs
+- Check job logs with the commands provided after submission
+- Cancel jobs if needed using the provided cancel command
 
 #### **BigQuery Issues**
 - Check BigQuery quotas and limits in GCP Console
