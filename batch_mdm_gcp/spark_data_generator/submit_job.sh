@@ -136,25 +136,29 @@ if [[ $RATIO_INT -gt 50 ]]; then
   echo "   This may not represent realistic MDM duplication patterns."
 fi
 
-# Calculate expected record counts for display
-EXPECTED_CRM=$(echo "scale=0; $TOTAL_RECORDS * 0.8 * 1.15 / 1" | bc)
-EXPECTED_ERP=$(echo "scale=0; $TOTAL_RECORDS * 0.7 / 1" | bc)
-EXPECTED_ECOMMERCE=$(echo "scale=0; $TOTAL_RECORDS * 0.6 * 1.3 / 1" | bc)
+# Calculate expected record counts for display based on UNIQUE_CUSTOMERS
+# This is the accurate calculation based on the Spark script's logic.
+EXPECTED_CRM=$(echo "scale=0; $UNIQUE_CUSTOMERS * 0.8 * 1.15 / 1" | bc)
+EXPECTED_ERP=$(echo "scale=0; $UNIQUE_CUSTOMERS * 0.7 / 1" | bc)
+EXPECTED_ECOMMERCE=$(echo "scale=0; $UNIQUE_CUSTOMERS * 0.6 * 1.35 / 1" | bc)
+TOTAL_EXPECTED=$(echo "$EXPECTED_CRM + $EXPECTED_ERP + $EXPECTED_ECOMMERCE" | bc)
 
 echo "🚀 Starting PySpark MDM Data Generation"
 echo "========================================="
 echo "Project:           $PROJECT_ID"
 echo "Dataset:           $DATASET_ID"
 echo "Region:            $REGION"
-echo "Total Records:     $(printf "%'d" $TOTAL_RECORDS)"
+echo "Input Records:     $(printf "%'d" $TOTAL_RECORDS) (used to derive unique customers)"
 echo "Unique Customers:  $(printf "%'d" $UNIQUE_CUSTOMERS)"
 echo "Partitions:        $PARTITIONS"
 echo "Write Mode:        $WRITE_MODE"
 echo ""
-echo "Expected Output:"
+echo "Accurate Estimated Output (based on unique customers):"
 echo "  CRM:             ~$(printf "%'d" $EXPECTED_CRM) records"
 echo "  ERP:             ~$(printf "%'d" $EXPECTED_ERP) records"
 echo "  E-commerce:      ~$(printf "%'d" $EXPECTED_ECOMMERCE) records"
+echo "-----------------------------------------"
+echo "  Total Expected:  ~$(printf "%'d" $TOTAL_EXPECTED) records"
 echo "========================================="
 
 # Check if gcloud is authenticated
