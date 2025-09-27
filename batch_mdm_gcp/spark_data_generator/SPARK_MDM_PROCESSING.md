@@ -68,6 +68,14 @@ source_df.repartition(200).write.format("bigquery")...
 
 This limits concurrent write streams from 1000 (default partitions) to 200, staying within API limits while maintaining performance.
 
+### Performance Optimizations
+Built-in Dataproc Serverless optimizations for reliability and speed:
+
+- **Kryo Serialization**: Fast, efficient object serialization (`spark.serializer=org.apache.spark.serializer.KryoSerializer`)
+- **Speculative Execution**: Automatic straggler task detection and backup execution (`spark.speculation=true`)
+- **Buffer Management**: Increased Kryo buffer to 512MB to prevent overflow errors (`spark.kryoserializer.buffer.max=512m`)
+- **Adaptive Query Execution**: Dynamic optimization of query plans and partition coalescing
+
 ### Schema Design
 Each source system has a dedicated schema to avoid BigQuery compatibility issues:
 
@@ -82,12 +90,35 @@ Preserves all original sophisticated variations:
 - **Variations**: 10 name variations, 7 address formats, 5 phone formats
 - **Data quality issues**: Typos (10%), missing data (15%), domain changes (20%)
 
+### Scaling Control & Cost Management
+
+The generator includes built-in scaling limits to prevent runaway costs while maintaining excellent performance:
+
+#### **Default Scaling Limits**
+- **Max Executors**: 150 (prevents cost explosion)
+- **Executor Resources**: 4 cores, 8GB RAM each (4 cores is minimum for Dataproc Serverless)
+- **Dynamic Allocation**: Auto-scales from 10 to 150 executors
+- **Auto-cleanup**: Automatic when job completes
+
+#### **Custom Scaling**
+Modify these variables in `submit_job.sh` for different requirements:
+
+```bash
+# Cost-sensitive (small jobs)
+MAX_EXECUTORS=50
+EXECUTOR_MEMORY="8g"
+
+# High-performance (large jobs)
+MAX_EXECUTORS=300
+EXECUTOR_MEMORY="16g"
+```
+
 ### Performance Characteristics
-| Records | Partitions | Approximate Time | Cost Estimate |
-|---------|------------|------------------|---------------|
-| 1M | 100 | 5-10 min | $2-5 |
-| 100M | 1000 | 30-60 min | $20-50 |
-| 1B | 5000 | 2-4 hours | $100-300 |
+| Records | Partitions | Max Executors | Approximate Time | Cost Estimate |
+|---------|------------|---------------|------------------|---------------|
+| 1M | 100 | 50 | 5-10 min | $2-5 |
+| 100M | 1000 | 150 | 30-60 min | $20-50 |
+| 1B | 5000 | 300 | 2-4 hours | $100-300 |
 
 ## Job Monitoring
 

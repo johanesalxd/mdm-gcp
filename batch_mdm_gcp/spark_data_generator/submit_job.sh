@@ -215,12 +215,72 @@ BATCH_ID="mdm-data-gen-$(date +%Y%m%d-%H%M%S)"
 
 echo "📦 Using pre-built Python dependencies via --py-files..."
 
+# ============================================
+# SCALING LIMITS (Cost Control & Performance)
+# ============================================
+# These limits prevent runaway costs while maintaining excellent performance
+#
+# WITHOUT LIMITS: 1000 partitions could spawn 1000+ executors = $1000+/hour
+# WITH LIMITS:    Max 150 executors with controlled resources = $50-100/hour
+#
+# For 100M records with 1000 partitions, these settings provide optimal balance:
+# - Fast processing through parallelism (150 executors)
+# - Cost control through resource limits
+# - BigQuery write optimization (repartition to 200 in code)
+
+# Executor Scaling Limits
+MAX_EXECUTORS=150           # Maximum executors (prevents cost explosion)
+MIN_EXECUTORS=10            # Minimum executors (faster startup)
+INITIAL_EXECUTORS=20        # Starting executors (balanced initialization)
+
+# Resource Per Executor (Cost vs Performance)
+EXECUTOR_CORES=4            # 4 cores per executor (minimum allowed for Serverless)
+EXECUTOR_MEMORY="8g"        # 8GB per executor (vs default 15GB = 47% cost reduction)
+
+# Driver Resources (Minimal - driver doesn't do heavy lifting)
+DRIVER_CORES=4              # 4 cores for driver (minimum allowed for Serverless)
+DRIVER_MEMORY="4g"          # Driver memory
+
+# Cleanup Settings (Note: Dataproc Serverless auto-cleans up when job completes)
+# Manual cleanup available via: gcloud dataproc batches cancel BATCH_ID
+
+# ============================================
+# ADVANCED: Override scaling limits if needed
+# ============================================
+# Uncomment and modify these lines to customize for specific needs:
+#
+# For smaller jobs (10M records):
+# MAX_EXECUTORS=50
+# EXECUTOR_MEMORY="8g"
+#
+# For high-performance requirements:
+# MAX_EXECUTORS=300
+# EXECUTOR_MEMORY="16g"
+# ============================================
+
+# Build properties string with scaling limits and performance optimizations
+SPARK_PROPERTIES="spark.sql.adaptive.enabled=true"
+SPARK_PROPERTIES="${SPARK_PROPERTIES},spark.sql.adaptive.coalescePartitions.enabled=true"
+SPARK_PROPERTIES="${SPARK_PROPERTIES},spark.dynamicAllocation.enabled=true"
+SPARK_PROPERTIES="${SPARK_PROPERTIES},spark.dynamicAllocation.maxExecutors=${MAX_EXECUTORS}"
+SPARK_PROPERTIES="${SPARK_PROPERTIES},spark.dynamicAllocation.minExecutors=${MIN_EXECUTORS}"
+SPARK_PROPERTIES="${SPARK_PROPERTIES},spark.dynamicAllocation.initialExecutors=${INITIAL_EXECUTORS}"
+SPARK_PROPERTIES="${SPARK_PROPERTIES},spark.executor.cores=${EXECUTOR_CORES}"
+SPARK_PROPERTIES="${SPARK_PROPERTIES},spark.executor.memory=${EXECUTOR_MEMORY}"
+SPARK_PROPERTIES="${SPARK_PROPERTIES},spark.driver.cores=${DRIVER_CORES}"
+SPARK_PROPERTIES="${SPARK_PROPERTIES},spark.driver.memory=${DRIVER_MEMORY}"
+
+# Performance optimizations for Dataproc Serverless
+SPARK_PROPERTIES="${SPARK_PROPERTIES},spark.serializer=org.apache.spark.serializer.KryoSerializer"
+SPARK_PROPERTIES="${SPARK_PROPERTIES},spark.speculation=true"
+SPARK_PROPERTIES="${SPARK_PROPERTIES},spark.kryoserializer.buffer.max=512m"
+
 GCLOUD_CMD="gcloud dataproc batches submit pyspark $SCRIPT_GCS_PATH \
   --batch=$BATCH_ID \
   --project=$PROJECT_ID \
   --region=$REGION \
   --py-files=$DEPENDENCIES_GCS_PATH \
-  --properties=spark.sql.adaptive.enabled=true,spark.sql.adaptive.coalescePartitions.enabled=true \
+  --properties=${SPARK_PROPERTIES} \
   --async"
 
 # Add optional network configuration
