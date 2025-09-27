@@ -20,11 +20,6 @@ from typing import Any, Dict, List
 import uuid
 
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col
-from pyspark.sql.functions import lit
-from pyspark.sql.functions import rand
-from pyspark.sql.functions import when
-import pyspark.sql.functions as F
 from pyspark.sql.types import BooleanType
 from pyspark.sql.types import DateType
 from pyspark.sql.types import FloatType
@@ -69,10 +64,9 @@ def get_customer_schema() -> StructType:
     ])
 
 
-def get_record_schema() -> StructType:
-    """Define schema for final records with source-specific fields."""
+def get_base_schema() -> StructType:
+    """Define base schema for all customer records."""
     return StructType([
-        # Base customer fields
         StructField("customer_id", StringType(), False),
         StructField("source_id", StringType(), True),
         StructField("source_system", StringType(), False),
@@ -94,25 +88,43 @@ def get_record_schema() -> StructType:
         StructField("registration_date", DateType(), True),
         StructField("last_activity_date", DateType(), True),
         StructField("is_active", BooleanType(), True),
+    ])
 
-        # CRM-specific fields
+
+def get_crm_schema() -> StructType:
+    """Define schema for CRM records."""
+    base_fields = get_base_schema().fields
+    crm_fields = [
         StructField("lead_source", StringType(), True),
         StructField("sales_rep", StringType(), True),
         StructField("deal_stage", StringType(), True),
+    ]
+    return StructType(base_fields + crm_fields)
 
-        # ERP-specific fields
+
+def get_erp_schema() -> StructType:
+    """Define schema for ERP records."""
+    base_fields = get_base_schema().fields
+    erp_fields = [
         StructField("account_number", StringType(), True),
         StructField("credit_limit", IntegerType(), True),
         StructField("payment_terms", StringType(), True),
         StructField("account_status", StringType(), True),
+    ]
+    return StructType(base_fields + erp_fields)
 
-        # E-commerce-specific fields
+
+def get_ecommerce_schema() -> StructType:
+    """Define schema for E-commerce records."""
+    base_fields = get_base_schema().fields
+    ecommerce_fields = [
         StructField("username", StringType(), True),
         StructField("total_orders", IntegerType(), True),
         StructField("total_spent", FloatType(), True),
         StructField("preferred_category", StringType(), True),
         StructField("marketing_opt_in", BooleanType(), True),
-    ])
+    ]
+    return StructType(base_fields + ecommerce_fields)
 
 
 def create_base_customer_data(partition_id: int, num_customers: int, seed_base: int):
@@ -124,7 +136,7 @@ def create_base_customer_data(partition_id: int, num_customers: int, seed_base: 
     # Import Faker within the function for distributed execution
     from faker import Faker
     fake = Faker()
-    fake.seed(partition_seed)
+    Faker.seed(partition_seed)
 
     customers = []
     start_id = partition_id * num_customers
@@ -162,14 +174,14 @@ def create_base_customer_data(partition_id: int, num_customers: int, seed_base: 
 
 
 def apply_data_variations(customer_data: Dict[str, Any], source: str, partition_seed: int) -> Dict[str, Any]:
-    """Apply sophisticated data variations (preserves all original logic)."""
+    """Apply sophisticated data variations (preserves all original logic) - CLEAN VERSION."""
     # Set seed for consistent variations within partition
     random.seed(partition_seed + hash(customer_data['customer_id']))
 
     # Import Faker for this partition
     from faker import Faker
     fake = Faker()
-    fake.seed(partition_seed + hash(customer_data['customer_id']))
+    Faker.seed(partition_seed + hash(customer_data['customer_id']))
 
     varied_customer = customer_data.copy()
 
@@ -276,22 +288,12 @@ def apply_data_variations(customer_data: Dict[str, Any], source: str, partition_
         field_to_miss = random.choice(fields_to_miss)
         varied_customer[field_to_miss] = None
 
-    # Add source-specific fields (matches original exactly)
+    # Add ONLY source-specific fields (like batch versions - NO None padding!)
     if source == 'crm':
         varied_customer.update({
             'lead_source': random.choice(['Website', 'Referral', 'Cold Call', 'Trade Show']),
             'sales_rep': fake.name(),
             'deal_stage': random.choice(['Prospect', 'Qualified', 'Proposal', 'Closed Won', 'Closed Lost']),
-            # Set non-CRM fields to None
-            'account_number': None,
-            'credit_limit': None,
-            'payment_terms': None,
-            'account_status': None,
-            'username': None,
-            'total_orders': None,
-            'total_spent': None,
-            'preferred_category': None,
-            'marketing_opt_in': None,
         })
     elif source == 'erp':
         varied_customer.update({
@@ -299,15 +301,6 @@ def apply_data_variations(customer_data: Dict[str, Any], source: str, partition_
             'credit_limit': random.randint(1000, 50000),
             'payment_terms': random.choice(['Net 30', 'Net 60', 'COD', 'Prepaid']),
             'account_status': random.choice(['Active', 'Suspended', 'Closed']),
-            # Set non-ERP fields to None
-            'lead_source': None,
-            'sales_rep': None,
-            'deal_stage': None,
-            'username': None,
-            'total_orders': None,
-            'total_spent': None,
-            'preferred_category': None,
-            'marketing_opt_in': None,
         })
     elif source == 'ecommerce':
         varied_customer.update({
@@ -316,14 +309,6 @@ def apply_data_variations(customer_data: Dict[str, Any], source: str, partition_
             'total_spent': round(random.uniform(50, 5000), 2),
             'preferred_category': random.choice(['Electronics', 'Clothing', 'Books', 'Home', 'Sports']),
             'marketing_opt_in': random.choice([True, False]),
-            # Set non-ecommerce fields to None
-            'lead_source': None,
-            'sales_rep': None,
-            'deal_stage': None,
-            'account_number': None,
-            'credit_limit': None,
-            'payment_terms': None,
-            'account_status': None,
         })
 
     return varied_customer
@@ -375,7 +360,7 @@ def main():
     parser.add_argument('--total-records', type=int,
                         default=100_000_000, help="Total records to generate")
     parser.add_argument('--unique-customers', type=int,
-                        default=25_000_000, help="Number of unique customers")
+                        required=True, help="Number of unique customers")
     parser.add_argument('--write-mode', type=str, default='overwrite', choices=['overwrite', 'append'],
                         help="Write mode for BigQuery tables")
     parser.add_argument('--partitions', type=int, default=1000,
@@ -444,9 +429,16 @@ def main():
                 partition, source, coverage, dup_weights)
         )
 
-        # Convert back to DataFrame
-        source_df = spark.createDataFrame(
-            source_rdd, schema=get_record_schema())
+        # Select appropriate schema for this source (like batch versions!)
+        if source == 'crm':
+            schema = get_crm_schema()
+        elif source == 'erp':
+            schema = get_erp_schema()
+        elif source == 'ecommerce':
+            schema = get_ecommerce_schema()
+
+        # Convert back to DataFrame with clean source-specific schema
+        source_df = spark.createDataFrame(source_rdd, schema=schema)
 
         # Write to BigQuery
         table_name = f"raw_{source}_customers{args.table_suffix}"

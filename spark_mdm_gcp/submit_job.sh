@@ -15,7 +15,7 @@ PROJECT_ID=""
 DATASET_ID="mdm_demo"
 TABLE_SUFFIX="_scale"
 TOTAL_RECORDS=100000000
-UNIQUE_CUSTOMERS=25000000
+UNIQUE_CUSTOMERS=""  # Will be auto-calculated if not specified
 WRITE_MODE="overwrite"
 PARTITIONS=1000
 REGION="us-central1"
@@ -75,7 +75,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --dataset-id         BigQuery dataset (default: mdm_demo)"
       echo "  --table-suffix       Table name suffix (default: _scale)"
       echo "  --total-records      Total records to generate (default: 100M)"
-      echo "  --unique-customers   Unique customers (default: 25M)"
+      echo "  --unique-customers   Unique customers (default: auto-calculated as 25% of total)"
       echo "  --write-mode         overwrite|append (default: overwrite)"
       echo "  --partitions         Spark partitions (default: 1000)"
       echo "  --region             GCP region (default: us-central1)"
@@ -83,14 +83,20 @@ while [[ $# -gt 0 ]]; do
       echo "  --service-account    Service account email (optional)"
       echo ""
       echo "Examples:"
-      echo "  # Basic 100M record generation"
+      echo "  # Basic 100M record generation (25M unique customers auto-calculated)"
       echo "  $0 --project-id my-project"
       echo ""
-      echo "  # Small test run"
-      echo "  $0 --project-id my-project --total-records 1000000 --unique-customers 250000"
+      echo "  # Small test run (250K unique customers auto-calculated)"
+      echo "  $0 --project-id my-project --total-records 1000000"
+      echo ""
+      echo "  # Custom ratios - explicit unique customers"
+      echo "  $0 --project-id my-project --total-records 1000000 --unique-customers 200000"
       echo ""
       echo "  # Large scale with custom settings"
       echo "  $0 --project-id my-project --total-records 1000000000 --partitions 5000"
+      echo ""
+      echo "Note: In MDM scenarios, unique customers should be less than total records"
+      echo "      as each customer appears in multiple systems with variations."
       exit 0
       ;;
     *)
@@ -107,10 +113,33 @@ if [[ -z "$PROJECT_ID" ]]; then
   exit 1
 fi
 
+# Auto-calculate unique customers if not specified
+# Rule: unique customers should be about 25% of total records for realistic MDM scenario
+if [[ -z "$UNIQUE_CUSTOMERS" ]]; then
+  UNIQUE_CUSTOMERS=$(echo "scale=0; $TOTAL_RECORDS / 4" | bc)
+  echo "ℹ️  Auto-calculated unique customers: $(printf "%'d" $UNIQUE_CUSTOMERS) (25% of total records)"
+fi
+
+# Validate that unique customers doesn't exceed total records
+if [[ $UNIQUE_CUSTOMERS -gt $TOTAL_RECORDS ]]; then
+  echo "❌ Error: Unique customers ($UNIQUE_CUSTOMERS) cannot exceed total records ($TOTAL_RECORDS)"
+  echo "In MDM scenarios, each unique customer generates multiple records across different systems."
+  echo "Suggested fix: Either increase --total-records or decrease --unique-customers"
+  exit 1
+fi
+
+# Warn if ratio seems unrealistic
+RATIO=$(echo "scale=2; $UNIQUE_CUSTOMERS * 100 / $TOTAL_RECORDS" | bc)
+RATIO_INT=$(echo "scale=0; $RATIO / 1" | bc)
+if [[ $RATIO_INT -gt 50 ]]; then
+  echo "⚠️  Warning: High unique customer ratio (${RATIO_INT}% of total records)"
+  echo "   This may not represent realistic MDM duplication patterns."
+fi
+
 # Calculate expected record counts for display
-EXPECTED_CRM=$(echo "scale=0; $TOTAL_RECORDS * 0.8 * 1.15" | bc)
-EXPECTED_ERP=$(echo "scale=0; $TOTAL_RECORDS * 0.7" | bc)
-EXPECTED_ECOMMERCE=$(echo "scale=0; $TOTAL_RECORDS * 0.6 * 1.3" | bc)
+EXPECTED_CRM=$(echo "scale=0; $TOTAL_RECORDS * 0.8 * 1.15 / 1" | bc)
+EXPECTED_ERP=$(echo "scale=0; $TOTAL_RECORDS * 0.7 / 1" | bc)
+EXPECTED_ECOMMERCE=$(echo "scale=0; $TOTAL_RECORDS * 0.6 * 1.3 / 1" | bc)
 
 echo "🚀 Starting PySpark MDM Data Generation"
 echo "========================================="
@@ -158,15 +187,34 @@ SCRIPT_GCS_PATH="gs://$TEMP_BUCKET/spark-mdm/spark_data_generator.py"
 echo "📤 Uploading PySpark script to $SCRIPT_GCS_PATH"
 gsutil cp spark_data_generator.py $SCRIPT_GCS_PATH
 
+# Upload the Python dependencies zip file to GCS
+DEPENDENCIES_GCS_PATH="gs://$TEMP_BUCKET/spark-mdm/dependencies.zip"
+echo "📦 Uploading Python dependencies to $DEPENDENCIES_GCS_PATH"
+
+if [[ -f "dependencies.zip" ]]; then
+  gsutil cp dependencies.zip $DEPENDENCIES_GCS_PATH
+  echo "✓ Dependencies zip uploaded successfully"
+else
+  echo "❌ Error: dependencies.zip not found"
+  echo "Please run 'mkdir dependencies && pip3 install faker --target=dependencies/ && cd dependencies && zip -r ../dependencies.zip .' first"
+  exit 1
+fi
+
 # Build the gcloud dataproc batches submit pyspark command
 BATCH_ID="mdm-data-gen-$(date +%Y%m%d-%H%M%S)"
+
+echo "📦 Using pre-built Python dependencies via --py-files..."
+echo "📦 Using latest BigQuery Spark connector..."
 
 GCLOUD_CMD="gcloud dataproc batches submit pyspark $SCRIPT_GCS_PATH \
   --batch=$BATCH_ID \
   --project=$PROJECT_ID \
   --region=$REGION \
-  --jars=gs://spark-lib/bigquery/spark-bigquery-with-dependencies_2.12-0.32.2.jar \
+  --py-files=$DEPENDENCIES_GCS_PATH \
   --properties=spark.sql.adaptive.enabled=true,spark.sql.adaptive.coalescePartitions.enabled=true"
+
+echo "✓ Faker and dependencies will be loaded via --py-files"
+echo "✓ Using latest BigQuery connector for optimal performance"
 
 # Add optional network configuration
 if [[ -n "$SUBNET" ]]; then
