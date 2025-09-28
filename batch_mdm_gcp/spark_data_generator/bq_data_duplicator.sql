@@ -33,16 +33,36 @@ DECLARE target_table_suffix STRING DEFAULT '_scale_x3';
 -- 1. Process CRM Data
 -- =================================================================================
 
--- Step 1.1: Create the new CRM table and insert the original data
-CREATE OR REPLACE TABLE `johanesa-playground-326616.mdm_demo.raw_crm_customers_scale_x3`
-  AS
-SELECT * FROM (
-  SELECT *,
-    -- Missing data simulation variables (single random decision per record)
-    RAND() AS missing_data_rand,
-    CAST(FLOOR(RAND() * 3) + 1 AS INT64) AS missing_data_choice  -- 1=phone, 2=company, 3=job_title
-  FROM `johanesa-playground-326616.mdm_demo.raw_crm_customers_scale`
-);
+-- Step 1.1: Create the new CRM table with explicit CRM schema (24 columns matching Spark)
+CREATE OR REPLACE TABLE `johanesa-playground-326616.mdm_demo.raw_crm_customers_scale_x3` AS
+SELECT
+  -- Base fields (21 columns)
+  customer_id,
+  source_id,
+  source_system,
+  record_id,
+  first_name,
+  last_name,
+  full_name,
+  email,
+  phone,
+  address,
+  city,
+  state,
+  zip_code,
+  date_of_birth,
+  company,
+  job_title,
+  annual_income,
+  customer_segment,
+  registration_date,
+  last_activity_date,
+  is_active,
+  -- CRM-specific fields (3 columns)
+  lead_source,
+  sales_rep,
+  deal_stage
+FROM `johanesa-playground-326616.mdm_demo.raw_crm_customers_scale`;
 
 -- Step 1.2: Insert the first set of varied duplicates (Enhanced to match Python logic)
 INSERT INTO `johanesa-playground-326616.mdm_demo.raw_crm_customers_scale_x3`
@@ -61,16 +81,16 @@ SELECT
   CASE
     WHEN RAND() < 0.3 THEN
       CASE
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'John') THEN REPLACE(full_name, 'John', 'Jon')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Michael') THEN REPLACE(full_name, 'Michael', 'Mike')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'William') THEN REPLACE(full_name, 'William', 'Bill')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Robert') THEN REPLACE(full_name, 'Robert', 'Bob')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'James') THEN REPLACE(full_name, 'James', 'Jim')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Christopher') THEN REPLACE(full_name, 'Christopher', 'Chris')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Matthew') THEN REPLACE(full_name, 'Matthew', 'Matt')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Anthony') THEN REPLACE(full_name, 'Anthony', 'Tony')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Elizabeth') THEN REPLACE(full_name, 'Elizabeth', 'Liz')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Jennifer') THEN REPLACE(full_name, 'Jennifer', 'Jen')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'John') > 0 THEN REPLACE(full_name, 'John', 'Jon')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Michael') > 0 THEN REPLACE(full_name, 'Michael', 'Mike')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'William') > 0 THEN REPLACE(full_name, 'William', 'Bill')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Robert') > 0 THEN REPLACE(full_name, 'Robert', 'Bob')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'James') > 0 THEN REPLACE(full_name, 'James', 'Jim')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Christopher') > 0 THEN REPLACE(full_name, 'Christopher', 'Chris')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Matthew') > 0 THEN REPLACE(full_name, 'Matthew', 'Matt')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Anthony') > 0 THEN REPLACE(full_name, 'Anthony', 'Tony')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Elizabeth') > 0 THEN REPLACE(full_name, 'Elizabeth', 'Liz')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Jennifer') > 0 THEN REPLACE(full_name, 'Jennifer', 'Jen')
         -- Typo Introduction (10% chance within name variations)
         WHEN RAND() < 0.1 AND LENGTH(full_name) > 3 THEN
           CONCAT(
@@ -196,16 +216,16 @@ SELECT
   CASE
     WHEN RAND() < 0.3 THEN
       CASE
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'John') THEN REPLACE(full_name, 'John', 'Jon')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Michael') THEN REPLACE(full_name, 'Michael', 'Mike')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'William') THEN REPLACE(full_name, 'William', 'Bill')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Robert') THEN REPLACE(full_name, 'Robert', 'Bob')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'James') THEN REPLACE(full_name, 'James', 'Jim')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Christopher') THEN REPLACE(full_name, 'Christopher', 'Chris')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Matthew') THEN REPLACE(full_name, 'Matthew', 'Matt')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Anthony') THEN REPLACE(full_name, 'Anthony', 'Tony')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Elizabeth') THEN REPLACE(full_name, 'Elizabeth', 'Liz')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Jennifer') THEN REPLACE(full_name, 'Jennifer', 'Jen')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'John') > 0 THEN REPLACE(full_name, 'John', 'Jon')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Michael') > 0 THEN REPLACE(full_name, 'Michael', 'Mike')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'William') > 0 THEN REPLACE(full_name, 'William', 'Bill')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Robert') > 0 THEN REPLACE(full_name, 'Robert', 'Bob')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'James') > 0 THEN REPLACE(full_name, 'James', 'Jim')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Christopher') > 0 THEN REPLACE(full_name, 'Christopher', 'Chris')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Matthew') > 0 THEN REPLACE(full_name, 'Matthew', 'Matt')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Anthony') > 0 THEN REPLACE(full_name, 'Anthony', 'Tony')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Elizabeth') > 0 THEN REPLACE(full_name, 'Elizabeth', 'Liz')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Jennifer') > 0 THEN REPLACE(full_name, 'Jennifer', 'Jen')
         -- Typo Introduction (10% chance within name variations)
         WHEN RAND() < 0.1 AND LENGTH(full_name) > 3 THEN
           CONCAT(
@@ -303,17 +323,50 @@ SELECT
 
   ['Prospect', 'Qualified', 'Proposal', 'Closed Won', 'Closed Lost'][OFFSET(CAST(FLOOR(RAND() * 5) AS INT64))] AS deal_stage
 
-FROM `johanesa-playground-326616.mdm_demo.raw_crm_customers_scale`;
+FROM (
+  SELECT *,
+    -- Missing data simulation variables (single random decision per record)
+    RAND() AS missing_data_rand,
+    CAST(FLOOR(RAND() * 3) + 1 AS INT64) AS missing_data_choice  -- 1=phone, 2=company, 3=job_title
+  FROM `johanesa-playground-326616.mdm_demo.raw_crm_customers_scale`
+);
 
 
 -- =================================================================================
 -- 2. Process ERP Data
 -- =================================================================================
 
--- Step 2.1: Create the new ERP table and insert the original data
-CREATE OR REPLACE TABLE `johanesa-playground-326616.mdm_demo.raw_erp_customers_scale_x3`
-  AS
-SELECT * FROM `johanesa-playground-326616.mdm_demo.raw_erp_customers_scale`;
+-- Step 2.1: Create the new ERP table with explicit ERP schema (25 columns matching Spark)
+CREATE OR REPLACE TABLE `johanesa-playground-326616.mdm_demo.raw_erp_customers_scale_x3` AS
+SELECT
+  -- Base fields (21 columns)
+  customer_id,
+  source_id,
+  source_system,
+  record_id,
+  first_name,
+  last_name,
+  full_name,
+  email,
+  phone,
+  address,
+  city,
+  state,
+  zip_code,
+  date_of_birth,
+  company,
+  job_title,
+  annual_income,
+  customer_segment,
+  registration_date,
+  last_activity_date,
+  is_active,
+  -- ERP-specific fields (4 columns)
+  account_number,
+  credit_limit,
+  payment_terms,
+  account_status
+FROM `johanesa-playground-326616.mdm_demo.raw_erp_customers_scale`;
 
 -- Step 2.2: Insert the first set of varied duplicates (Enhanced to match Python logic)
 INSERT INTO `johanesa-playground-326616.mdm_demo.raw_erp_customers_scale_x3`
@@ -332,16 +385,16 @@ SELECT
   CASE
     WHEN RAND() < 0.3 THEN
       CASE
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'John') THEN REPLACE(full_name, 'John', 'Jon')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Michael') THEN REPLACE(full_name, 'Michael', 'Mike')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'William') THEN REPLACE(full_name, 'William', 'Bill')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Robert') THEN REPLACE(full_name, 'Robert', 'Bob')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'James') THEN REPLACE(full_name, 'James', 'Jim')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Christopher') THEN REPLACE(full_name, 'Christopher', 'Chris')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Matthew') THEN REPLACE(full_name, 'Matthew', 'Matt')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Anthony') THEN REPLACE(full_name, 'Anthony', 'Tony')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Elizabeth') THEN REPLACE(full_name, 'Elizabeth', 'Liz')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Jennifer') THEN REPLACE(full_name, 'Jennifer', 'Jen')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'John') > 0 THEN REPLACE(full_name, 'John', 'Jon')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Michael') > 0 THEN REPLACE(full_name, 'Michael', 'Mike')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'William') > 0 THEN REPLACE(full_name, 'William', 'Bill')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Robert') > 0 THEN REPLACE(full_name, 'Robert', 'Bob')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'James') > 0 THEN REPLACE(full_name, 'James', 'Jim')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Christopher') > 0 THEN REPLACE(full_name, 'Christopher', 'Chris')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Matthew') > 0 THEN REPLACE(full_name, 'Matthew', 'Matt')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Anthony') > 0 THEN REPLACE(full_name, 'Anthony', 'Tony')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Elizabeth') > 0 THEN REPLACE(full_name, 'Elizabeth', 'Liz')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Jennifer') > 0 THEN REPLACE(full_name, 'Jennifer', 'Jen')
         -- Typo Introduction (10% chance within name variations)
         WHEN RAND() < 0.1 AND LENGTH(full_name) > 3 THEN
           CONCAT(
@@ -458,16 +511,16 @@ SELECT
   CASE
     WHEN RAND() < 0.3 THEN
       CASE
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'John') THEN REPLACE(full_name, 'John', 'Jon')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Michael') THEN REPLACE(full_name, 'Michael', 'Mike')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'William') THEN REPLACE(full_name, 'William', 'Bill')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Robert') THEN REPLACE(full_name, 'Robert', 'Bob')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'James') THEN REPLACE(full_name, 'James', 'Jim')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Christopher') THEN REPLACE(full_name, 'Christopher', 'Chris')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Matthew') THEN REPLACE(full_name, 'Matthew', 'Matt')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Anthony') THEN REPLACE(full_name, 'Anthony', 'Tony')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Elizabeth') THEN REPLACE(full_name, 'Elizabeth', 'Liz')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Jennifer') THEN REPLACE(full_name, 'Jennifer', 'Jen')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'John') > 0 THEN REPLACE(full_name, 'John', 'Jon')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Michael') > 0 THEN REPLACE(full_name, 'Michael', 'Mike')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'William') > 0 THEN REPLACE(full_name, 'William', 'Bill')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Robert') > 0 THEN REPLACE(full_name, 'Robert', 'Bob')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'James') > 0 THEN REPLACE(full_name, 'James', 'Jim')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Christopher') > 0 THEN REPLACE(full_name, 'Christopher', 'Chris')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Matthew') > 0 THEN REPLACE(full_name, 'Matthew', 'Matt')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Anthony') > 0 THEN REPLACE(full_name, 'Anthony', 'Tony')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Elizabeth') > 0 THEN REPLACE(full_name, 'Elizabeth', 'Liz')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Jennifer') > 0 THEN REPLACE(full_name, 'Jennifer', 'Jen')
         -- Typo Introduction (10% chance within name variations)
         WHEN RAND() < 0.1 AND LENGTH(full_name) > 3 THEN
           CONCAT(
@@ -572,10 +625,38 @@ FROM (
 -- 3. Process E-commerce Data
 -- =================================================================================
 
--- Step 3.1: Create the new E-commerce table and insert the original data
-CREATE OR REPLACE TABLE `johanesa-playground-326616.mdm_demo.raw_ecommerce_customers_scale_x3`
-  AS
-SELECT * FROM `johanesa-playground-326616.mdm_demo.raw_ecommerce_customers_scale`;
+-- Step 3.1: Create the new E-commerce table with explicit E-commerce schema (26 columns matching Spark)
+CREATE OR REPLACE TABLE `johanesa-playground-326616.mdm_demo.raw_ecommerce_customers_scale_x3` AS
+SELECT
+  -- Base fields (21 columns)
+  customer_id,
+  source_id,
+  source_system,
+  record_id,
+  first_name,
+  last_name,
+  full_name,
+  email,
+  phone,
+  address,
+  city,
+  state,
+  zip_code,
+  date_of_birth,
+  company,
+  job_title,
+  annual_income,
+  customer_segment,
+  registration_date,
+  last_activity_date,
+  is_active,
+  -- E-commerce-specific fields (5 columns)
+  username,
+  total_orders,
+  total_spent,
+  preferred_category,
+  marketing_opt_in
+FROM `johanesa-playground-326616.mdm_demo.raw_ecommerce_customers_scale`;
 
 -- Step 3.2: Insert the first set of varied duplicates (Enhanced to match Python logic)
 INSERT INTO `johanesa-playground-326616.mdm_demo.raw_ecommerce_customers_scale_x3`
@@ -594,16 +675,16 @@ SELECT
   CASE
     WHEN RAND() < 0.3 THEN
       CASE
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'John') THEN REPLACE(full_name, 'John', 'Jon')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Michael') THEN REPLACE(full_name, 'Michael', 'Mike')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'William') THEN REPLACE(full_name, 'William', 'Bill')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Robert') THEN REPLACE(full_name, 'Robert', 'Bob')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'James') THEN REPLACE(full_name, 'James', 'Jim')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Christopher') THEN REPLACE(full_name, 'Christopher', 'Chris')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Matthew') THEN REPLACE(full_name, 'Matthew', 'Matt')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Anthony') THEN REPLACE(full_name, 'Anthony', 'Tony')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Elizabeth') THEN REPLACE(full_name, 'Elizabeth', 'Liz')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Jennifer') THEN REPLACE(full_name, 'Jennifer', 'Jen')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'John') > 0 THEN REPLACE(full_name, 'John', 'Jon')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Michael') > 0 THEN REPLACE(full_name, 'Michael', 'Mike')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'William') > 0 THEN REPLACE(full_name, 'William', 'Bill')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Robert') > 0 THEN REPLACE(full_name, 'Robert', 'Bob')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'James') > 0 THEN REPLACE(full_name, 'James', 'Jim')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Christopher') > 0 THEN REPLACE(full_name, 'Christopher', 'Chris')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Matthew') > 0 THEN REPLACE(full_name, 'Matthew', 'Matt')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Anthony') > 0 THEN REPLACE(full_name, 'Anthony', 'Tony')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Elizabeth') > 0 THEN REPLACE(full_name, 'Elizabeth', 'Liz')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Jennifer') > 0 THEN REPLACE(full_name, 'Jennifer', 'Jen')
         -- Typo Introduction (10% chance within name variations)
         WHEN RAND() < 0.1 AND LENGTH(full_name) > 3 THEN
           CONCAT(
@@ -726,16 +807,16 @@ SELECT
   CASE
     WHEN RAND() < 0.3 THEN
       CASE
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'John') THEN REPLACE(full_name, 'John', 'Jon')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Michael') THEN REPLACE(full_name, 'Michael', 'Mike')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'William') THEN REPLACE(full_name, 'William', 'Bill')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Robert') THEN REPLACE(full_name, 'Robert', 'Bob')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'James') THEN REPLACE(full_name, 'James', 'Jim')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Christopher') THEN REPLACE(full_name, 'Christopher', 'Chris')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Matthew') THEN REPLACE(full_name, 'Matthew', 'Matt')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Anthony') THEN REPLACE(full_name, 'Anthony', 'Tony')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Elizabeth') THEN REPLACE(full_name, 'Elizabeth', 'Liz')
-        WHEN RAND() < 0.3 AND CONTAINS(full_name, 'Jennifer') THEN REPLACE(full_name, 'Jennifer', 'Jen')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'John') > 0 THEN REPLACE(full_name, 'John', 'Jon')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Michael') > 0 THEN REPLACE(full_name, 'Michael', 'Mike')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'William') > 0 THEN REPLACE(full_name, 'William', 'Bill')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Robert') > 0 THEN REPLACE(full_name, 'Robert', 'Bob')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'James') > 0 THEN REPLACE(full_name, 'James', 'Jim')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Christopher') > 0 THEN REPLACE(full_name, 'Christopher', 'Chris')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Matthew') > 0 THEN REPLACE(full_name, 'Matthew', 'Matt')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Anthony') > 0 THEN REPLACE(full_name, 'Anthony', 'Tony')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Elizabeth') > 0 THEN REPLACE(full_name, 'Elizabeth', 'Liz')
+        WHEN RAND() < 0.3 AND STRPOS(full_name, 'Jennifer') > 0 THEN REPLACE(full_name, 'Jennifer', 'Jen')
         -- Typo Introduction (10% chance within name variations)
         WHEN RAND() < 0.1 AND LENGTH(full_name) > 3 THEN
           CONCAT(

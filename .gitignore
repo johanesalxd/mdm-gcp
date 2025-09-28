@@ -11,3 +11,6 @@ __pycache__/
 # Dependency management
 **/dependencies/
 **/dependencies.zip
+
+# OS related
+*.DS_Store
