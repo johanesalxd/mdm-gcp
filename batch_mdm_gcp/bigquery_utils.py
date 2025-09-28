@@ -151,10 +151,11 @@ def generate_standardization_sql(source_table: str, target_table: str) -> str:
     """
 
 
-def generate_union_sql(dataset_ref: str) -> str:
+def generate_union_sql(dataset_ref: str, table_suffix: str = "") -> str:
     """Generate SQL to combine all raw data sources with consistent schema"""
+    suffix = f"_{table_suffix}" if table_suffix else ""
     return f"""
-    CREATE OR REPLACE TABLE `{dataset_ref}.raw_customers_combined` AS
+    CREATE OR REPLACE TABLE `{dataset_ref}.raw_customers_combined{suffix}` AS
     -- CRM data with standardized columns
     SELECT
       record_id,
@@ -178,7 +179,7 @@ def generate_union_sql(dataset_ref: str) -> str:
       registration_date,
       last_activity_date,
       is_active
-    FROM `{dataset_ref}.raw_crm_customers`
+    FROM `{dataset_ref}.raw_crm_customers{suffix}`
 
     UNION ALL
 
@@ -205,7 +206,7 @@ def generate_union_sql(dataset_ref: str) -> str:
       registration_date,
       last_activity_date,
       is_active
-    FROM `{dataset_ref}.raw_erp_customers`
+    FROM `{dataset_ref}.raw_erp_customers{suffix}`
 
     UNION ALL
 
@@ -232,7 +233,7 @@ def generate_union_sql(dataset_ref: str) -> str:
       registration_date,
       last_activity_date,
       is_active
-    FROM `{dataset_ref}.raw_ecommerce_customers`
+    FROM `{dataset_ref}.raw_ecommerce_customers{suffix}`
     """
 
 
