@@ -259,6 +259,45 @@ def generate_embedding_sql(source_table: str, target_table: str, model_name: str
     """
 
 
+def generate_embedding_sql_limited(source_table: str, target_table: str, model_name: str, limit: int) -> str:
+    """Generate SQL for creating embeddings with limited sample while preserving all records"""
+    return f"""
+    CREATE OR REPLACE TABLE `{target_table}` AS
+    WITH sample_records AS (
+      SELECT record_id
+      FROM `{source_table}`
+      ORDER BY RAND()
+      LIMIT {limit}
+    ),
+    embeddings AS (
+      SELECT *
+      FROM ML.GENERATE_EMBEDDING(
+        MODEL `{model_name}`,
+        (SELECT
+          CONCAT(
+            IFNULL(full_name_clean, ''), ' ',
+            IFNULL(email_clean, ''), ' ',
+            IFNULL(address_clean, ''), ' ',
+            IFNULL(city_clean, ''), ' ',
+            IFNULL(company, '')
+          ) AS content,
+          *
+        FROM `{source_table}`
+        WHERE record_id IN (SELECT record_id FROM sample_records)),
+        STRUCT(TRUE AS flatten_json_output, 'RETRIEVAL_DOCUMENT' AS task_type)
+      )
+    )
+    SELECT
+      c.*,
+      e.ml_generate_embedding_result,
+      e.ml_generate_embedding_statistics,
+      e.ml_generate_embedding_status,
+      e.content
+    FROM `{source_table}` c
+    LEFT JOIN embeddings e ON c.record_id = e.record_id
+    """
+
+
 def generate_exact_matching_sql(table_name: str) -> str:
     """Generate SQL for exact matching"""
     return f"""
